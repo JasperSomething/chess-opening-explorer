@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Opening Atlas · Local Explorer</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header>
+      <div class="brand">♞ <span>Opening Atlas</span></div>
+      <span class="local">● LOCAL DATABASE</span>
+    </header>
+    <main>
+      <div class="intro">
+        <div>
+          <div class="eyebrow">FOLLOW THE POSITION</div>
+          <h1>Explore your next move.</h1>
+          <p>Master practice meets the moves people actually play.</p>
+        </div>
+        <div id="coverage" class="coverage"></div>
+      </div>
+      <div class="layout">
+        <section class="board-card">
+          <div class="board-heading">
+            <strong id="turn">White to move</strong
+            ><button id="flip" title="Flip board">⇅ Flip board</button>
+          </div>
+          <div id="board" role="group" aria-label="Chessboard"></div>
+          <div class="navigation">
+            <button id="start" title="Initial position">⏮</button
+            ><button id="back" title="Back (left arrow)">← Back</button
+            ><button id="forward" title="Forward (right arrow)">
+              Forward →</button
+            ><span id="ply"></span>
+          </div>
+          <div class="hint">Select a piece, then a highlighted square.</div>
+        </section>
+        <section class="analysis">
+          <div class="panel">
+            <div class="eyebrow">YOUR LINE</div>
+            <div id="line"></div>
+            <div id="transposition" class="muted"></div>
+          </div>
+          <div class="panel continuations">
+            <div class="section-title">
+              <h2>Continuations</h2>
+              <span class="badge">● Major ≥20%</span>
+            </div>
+            <p id="notice" class="muted"></p>
+            <label class="toggle"
+              ><input type="checkbox" id="legal" /> Include unrecorded legal
+              moves</label
+            >
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Move</th>
+                    <th>Masters</th>
+                    <th>Lichess</th>
+                    <th>Frequency</th>
+                  </tr>
+                </thead>
+                <tbody id="moves"></tbody>
+              </table>
+            </div>
+            <p class="footnote">
+              Frequency is the share of recorded next moves, across all rating
+              groups and speeds in the Lichess rated-game Explorer.
+            </p>
+          </div>
+        </section>
+      </div>
+      <details>
+        <summary>Position & data details</summary>
+        <p id="details"></p>
+        <code id="fen"></code>
+      </details>
+      <p id="error" role="alert"></p>
+    </main>
+    <dialog id="promotion">
+      <h3>Promote pawn</h3>
+      <div id="promotion-options"></div>
+      <button id="cancel-promotion">Cancel</button>
+    </dialog>
+    <script src="/app.js"></script>
+  </body>
+</html>

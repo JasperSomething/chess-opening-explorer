@@ -1,0 +1,2 @@
+-r requirements.txt
+py7zr>=1.0,<2

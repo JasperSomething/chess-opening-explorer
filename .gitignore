@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.sqlite*
+*.lock
+.env
+*token*
+*.log
+data/*.7z*
+data/*.pgn
+data/*.sha256
+data/*audit*.json
+data/.extract-*/
