@@ -18,7 +18,7 @@ python3 -m venv .venv
 
 Open http://127.0.0.1:8766/. The server listens only on your computer. Databases and source games are **not included in Git**. The UI works during import; unavailable counts are `—`, and incomplete counts are explicitly labelled.
 
-Both Lumbra count columns stay visible. The selector changes sorting and the **Opening %** denominator between all games and both players 2200+. It preserves the current move sequence. Lichess counts, percentages and the >=20% highlight are separate. Click continuations or board squares; Back/Forward and arrow keys navigate your line. Identical board positions share statistics across different move orders.
+Both Lumbra count columns stay visible. Separate **All games %** and **2200+ %** columns use their respective continuation totals. The selector changes sorting between the two groups. It preserves the current move sequence. Lichess counts, percentages and the >=20% highlight are separate. Click continuations or board squares; Back/Forward and arrow keys navigate your line. Identical board positions share statistics across different move orders.
 
 ## Download and build the local reference
 

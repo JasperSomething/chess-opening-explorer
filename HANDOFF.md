@@ -12,7 +12,7 @@ User selections: use every game in the publisher’s OTB collection, and offer a
 - Candidate pass checkpoints every 20,000 games, exact pass every 1,000. Input offset and exact counts commit atomically. Candidate flush precedes checkpoint. Replaying a candidate batch only introduces extra candidates. Same settings/input resume; changed input requires new output.
 - Exact >=100 all-game edge closure is constructed after counting, with transpositions and incoming links. Both rating groups retain all continuations at retained positions.
 - `enrich_lumbra.py`: verified-cache seed via SQLite backup, Lichess-only missing-snapshot queue over the completed local retained graph, serial API rate handling inherited from the existing client. Separate cache avoids mixing this queue with the original Masters crawler.
-- UI: all-games and both-2200+ counts side by side; selector changes sorting and opening percentage. Cached Lichess statistics remain separate. Auto-refresh while importing or missing current Lichess data.
+- UI: all-games and both-2200+ counts side by side; selector changes sorting; each group has its own percentage column. Cached Lichess statistics remain separate. Auto-refresh while importing or missing current Lichess data.
 - `explorer.py serve --local-db ...` supports alternate generations. Current local comparison server was launched on port 8766 with `data/lumbra-lichess.sqlite`.
 
 ## Verification

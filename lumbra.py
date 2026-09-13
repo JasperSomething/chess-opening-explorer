@@ -245,9 +245,10 @@ def decorate(data, path, reference='all'):
         row = rows.get(move['uci'])
         move['lumbra'] = count(row) if row else (0 if ready else None)
         move['lumbra2200'] = count(row, True) if row else (0 if ready else None)
-        which = 1 if reference == '2200' else 0
-        n = move['lumbra2200'] if which else move['lumbra']
-        move['reference_percent'] = n / totals[which] * 100 if n is not None and totals[which] else None
+        for field, denominator in zip(('lumbra', 'lumbra2200'), totals):
+            n = move[field]
+            move[field + '_percent'] = n / denominator * 100 if n is not None and denominator else None
+        move['reference_percent'] = move['lumbra2200_percent' if reference == '2200' else 'lumbra_percent']
     data['local_totals'] = [count(rows[''], strong) for strong in (False, True)] if ready else [None, None]
     field = 'lumbra2200' if reference == '2200' else 'lumbra'
     data['moves'].sort(key=lambda m: (-(m[field] or 0), -(m['lichess'] or 0), m['san']))

@@ -151,8 +151,8 @@ function render() {
   const checkpointAge = (Date.now() / 1000) - (imp.updated || imp.started || Date.now() / 1000);
   const stalled = !complete && !imp.sample && checkpointAge > 600 ? " No saved progress for " + Math.floor(checkpointAge / 60) + " minutes; check the import log. " : "";
   $("#notice").textContent = stalled +
-    (imp.sample ? "Sample only: these counts cover a limited set of games. " : complete ? (data.local_totals[0] === null ? "Outside imported frequent-position coverage. " : "") : "Import in progress: local counts are incomplete. ") +
-    "All games: " + fmt(data.local_totals[0]) + " · Both 2200+: " + fmt(data.local_totals[1]) +
+    (imp.sample ? "Sample only: these counts cover a limited set of games. " : complete ? (data.local_totals[0] === null ? "Outside imported frequent-position coverage. " : "") : (imp.phase === "candidates" ? "Pass 1 is finding frequent positions. Game counts and percentages for BOTH groups appear in pass 2; Pending does not mean zero. " : "Pass 2 counts are partial until the full import finishes. ")) +
+    "All games: " + (imp.phase === "candidates" ? "Pending" : fmt(data.local_totals[0])) + " · Both 2200+: " + (imp.phase === "candidates" ? "Pending" : fmt(data.local_totals[1])) +
     (data.sources.lichess ? " · Lichess loaded" : " · Lichess statistics pending");
   $("#moves").replaceChildren();
   for (let m of data.moves) {
@@ -165,9 +165,11 @@ function render() {
     button.onclick = () => play(m.uci);
     move.append(button);
     tr.append(move);
-    for (let n of [m.lumbra, m.lumbra2200, m.reference_percent, m.lichess]) {
-      let td = document.createElement("td");
-      td.textContent = tr.children.length === 3 ? (n === null ? "—" : n.toFixed(1) + "%") : fmt(n);
+    for (const [n, percent] of [[m.lumbra, false], [m.lumbra_percent, true], [m.lumbra2200, false], [m.lumbra2200_percent, true], [m.lichess, false]]) {
+      const td = document.createElement("td");
+      td.textContent = n === null || n === undefined
+        ? (imp.phase === "candidates" && tr.children.length < 5 ? "Pending" : "—")
+        : percent ? n.toFixed(1) + "%" : fmt(n);
       tr.append(td);
     }
     let td = document.createElement("td");
@@ -184,7 +186,7 @@ function render() {
   if (!$("#moves").children.length) {
     let tr = document.createElement("tr"),
       td = document.createElement("td");
-    td.colSpan = 6;
+    td.colSpan = 7;
     td.textContent = data.moves.length
       ? "No recorded moves. Enable legal moves or use the board."
       : "No legal moves.";
