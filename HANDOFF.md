@@ -31,3 +31,7 @@ User selections: use every game in the publisher’s OTB collection, and offer a
 Source PGN: `data/LumbrasGigaBase_OTB_Complete.pgn`. Local graph: `data/lumbra.sqlite`; preserve its `.candidates` file until complete. API cache: `data/lumbra-lichess.sqlite`. Original `openings.sqlite` stays unchanged by the new pipeline. Some early candidate/sample databases may remain locally for inspection and are ignored by Git.
 
 Follow README for launch, resume, enrichment and rebuild commands. Data, candidate arrays, tokens and logs must stay out of Git. Public source metadata attributes Lumbra’s CC BY-NC-SA 4.0 database. The separate local HERMES-HANDOFF.md includes machine-specific context and must not be published automatically.
+
+## Latest priority change
+
+User requested 2200+ first. The all-games importer is paused at its checkpoint. A chained pipeline now builds `data/lumbra-2200.sqlite` using `--minimum-rating 2200`, then resumes `lumbra.py`, then runs enrichment. UI reads the independent strong-player graph until the all-games graph is complete. Headers below 2200 or missing ratings skip move replay. There are now 18 passing offline tests. Inspect logs and state for current process progress.

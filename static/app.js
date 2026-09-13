@@ -148,11 +148,14 @@ function render() {
   $("#coverage").textContent = complete
     ? "Lumbra complete · " + fmt(imp.accepted) + " games · " + fmt(imp.retained_positions) + " opening positions"
     : "Lumbra import · " + ({candidates: "Pass 1/2: finding positions", exact: "Pass 2/2: counting games", finalizing: "Building opening graph", complete: "Sample only", not_started: "Waiting to start"}[imp.phase] || imp.phase) + " · " + fmt(imp.games) + " games" + (imp.progress_percent ? " · " + imp.progress_percent.toFixed(1) + "% of this pass" : "");
-  const checkpointAge = (Date.now() / 1000) - (imp.updated || imp.started || Date.now() / 1000);
-  const stalled = !complete && !imp.sample && checkpointAge > 600 ? " No saved progress for " + Math.floor(checkpointAge / 60) + " minutes; check the import log. " : "";
-  $("#notice").textContent = stalled +
-    (imp.sample ? "Sample only: these counts cover a limited set of games. " : complete ? (data.local_totals[0] === null ? "Outside imported frequent-position coverage. " : "") : (imp.phase === "candidates" ? "Pass 1 is finding frequent positions. Game counts and percentages for BOTH groups appear in pass 2; Pending does not mean zero. " : "Pass 2 counts are partial until the full import finishes. ")) +
-    "All games: " + (imp.phase === "candidates" ? "Pending" : fmt(data.local_totals[0])) + " · Both 2200+: " + (imp.phase === "candidates" ? "Pending" : fmt(data.local_totals[1])) +
+  const strong = data.strong_import;
+  if (strong && !complete) {
+    $("#coverage").textContent = "2200+ first · " + (strong.phase === "complete" ? "Complete" : "Pass " + (strong.phase === "candidates" ? "1/2" : "2/2")) + " · " + fmt(strong.games) + " records scanned · " + fmt(strong.accepted) + " qualifying games";
+  }
+  const countLabel = (n) => n === null ? "Pending" : fmt(n);
+  $("#notice").textContent =
+    (strong && !complete ? (strong.phase === "complete" ? "2200+ counts are ready. The all-games import continues separately. " : "Processing both-2200+ games first. Counts appear during its second pass and remain partial until complete. ") : complete ? "Local import complete. " : "Import in progress: counts appear in pass 2 and remain partial until complete. ") +
+    "All games: " + countLabel(data.local_totals[0]) + " · Both 2200+: " + countLabel(data.local_totals[1]) +
     (data.sources.lichess ? " · Lichess loaded" : " · Lichess statistics pending");
   $("#moves").replaceChildren();
   for (let m of data.moves) {

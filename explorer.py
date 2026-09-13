@@ -269,7 +269,9 @@ def serve(path, port, local_path=None):
                         data = position(db, seq.split(',') if seq else [])
                     from lumbra import decorate
                     reference = parse.parse_qs(url.query).get('reference', ['all'])[0]
-                    data = decorate(data, local_path or ROOT / 'data/lumbra.sqlite', reference)
+                    reference_path = Path(local_path or ROOT / 'data/lumbra.sqlite')
+                    strong_path = reference_path.with_name('lumbra-2200.sqlite') if reference_path.name == 'lumbra.sqlite' else None
+                    data = decorate(data, reference_path, reference, strong_path)
                     content, mime = json.dumps(data).encode(), 'application/json'
                 else:
                     name = {'/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css'}.get(url.path)

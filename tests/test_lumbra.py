@@ -118,3 +118,22 @@ class EnrichmentTests(unittest.TestCase):
                 self.assertEqual(enrich_lumbra.enrich(root/'local.sqlite', root/'cache.sqlite', fake),1)
                 self.assertEqual(enrich_lumbra.enrich(root/'local.sqlite', root/'cache.sqlite', fake),0)
             self.assertEqual([s for s,_ in fake.calls], ['lichess'])
+
+class PriorityTests(unittest.TestCase):
+    def test_2200_first_independent_counts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pgn = root/'games.pgn'
+            pgn.write_text(game('1. e4') + game('1. d4', black='2199') + game('1. c4', white='?'))
+            with contextlib.redirect_stdout(io.StringIO()):
+                state = lumbra.run(pgn, root/'strong.sqlite', bits=4, threshold=1, minimum_rating=2200)
+            self.assertEqual(state['accepted'], 1)
+            self.assertEqual(state['excluded']['below_rating_or_missing'], 2)
+            db = explorer.connect(root/'cache.sqlite')
+            data = lumbra.decorate(explorer.position(db, []), root/'all.sqlite', '2200', root/'strong.sqlite')
+            self.assertEqual(data['local_totals'], [None,1])
+            self.assertEqual(data['moves'][0]['san'], 'e4')
+            self.assertEqual(data['moves'][0]['lumbra2200_percent'], 100)
+            self.assertIsNone(data['moves'][0]['lumbra'])
+            self.assertEqual(data['strong_import']['phase'], 'complete')
+            db.close()

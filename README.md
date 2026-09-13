@@ -92,3 +92,15 @@ Cached Lichess snapshots retain their original timestamps. For entirely fresh Li
 `lumbra.py` owns the local import, candidate filter and UI overlay. `enrich_lumbra.py` handles the Lichess-only queue. `explorer.py` contains normalization, the API client, the legacy Masters crawler, cache persistence and HTTP server. `static/` has no build step or external dependencies.
 
 The local reference has `state`, `counts` (full canonical position + UCI, six W/D/L counts), `retained`, and `links` tables. The empty UCI denotes position totals. The separate API cache retains `positions`, `snapshots`, `moves` and `meta` tables. Original `explorer.py crawl/status` commands describe the legacy Masters graph, not completion of the local Lumbra import.
+
+## Prioritize 2200+
+
+To build both-2200+ games first, pause the all-games importer, then run:
+
+```sh
+.venv/bin/python lumbra.py --minimum-rating 2200 --db data/lumbra-2200.sqlite
+# After it finishes, resume the all-games checkpoint:
+.venv/bin/python lumbra.py
+```
+
+The rating filter skips excluded games before move replay. The independent 2200+ graph uses its own >=100 threshold and is displayed while the all-games graph is incomplete. Once the full all-games graph completes, its 2200+ statistics replace the priority view, covering the larger all-games position set. No missing values from the priority build are treated as all-games counts. The default UI selection is 2200+.

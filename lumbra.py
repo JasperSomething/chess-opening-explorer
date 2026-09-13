@@ -55,7 +55,8 @@ class Candidates:
 
 
 class Visitor(chess.pgn.BaseVisitor):
-    def __init__(self, candidates, exact):
+    def __init__(self, candidates, exact, minimum_rating=0):
+        self.minimum_rating = minimum_rating
         self.candidates, self.exact = candidates, exact
         self.headers, self.seen, self.rows = {}, set(), {}
         self.error, self.strong, self.outcome = None, False, None
@@ -71,6 +72,8 @@ class Visitor(chess.pgn.BaseVisitor):
         except ValueError: self.error = 'invalid_start'
         try: self.strong = min(int(self.headers.get('WhiteElo', '0')), int(self.headers.get('BlackElo', '0'))) >= 2200
         except ValueError: self.strong = False
+        if self.minimum_rating and not self.strong and not self.error:
+            self.error = 'below_rating_or_missing'
         if self.error: return chess.pgn.SKIP
     def begin_variation(self): return chess.pgn.SKIP
     def handle_error(self, error): self.error = 'parse_error'
@@ -153,11 +156,13 @@ def finalize(db, state):
         checkpoint(db, state)
 
 
-def run(pgn, path, bits=27, threshold=100, limit=None, batch=1000):
+def run(pgn, path, bits=27, threshold=100, limit=None, batch=1000, minimum_rating=0):
     pgn, path = Path(pgn).resolve(), Path(path).resolve()
     stat = pgn.stat()
     identity = {'file': str(pgn), 'bytes': stat.st_size, 'mtime_ns': stat.st_mtime_ns,
                 'bits': bits, 'threshold': threshold, 'limit': limit, 'version': 1}
+    if minimum_rating not in (0, 2200): raise ValueError('Supported rating selections: 0 or 2200')
+    if minimum_rating: identity['minimum_rating'] = minimum_rating
     db = connect(path)
     state = get_state(db)
     if state and state['input'] != identity: raise ValueError('Input/settings changed: use a new database')
@@ -175,7 +180,7 @@ def run(pgn, path, bits=27, threshold=100, limit=None, batch=1000):
                 while limit is None or state['games'] < limit:
                     if shutil.disk_usage(path.parent).free < 3 * 1024**3:
                         raise RuntimeError('Stopped with less than 3 GiB free; committed progress can resume')
-                    game = chess.pgn.read_game(handle, Visitor=lambda: Visitor(candidates, phase == 'exact'))
+                    game = chess.pgn.read_game(handle, Visitor=lambda: Visitor(candidates, phase == 'exact', minimum_rating))
                     if game is None: break
                     state['games'] += 1
                     if game.error:
@@ -210,15 +215,16 @@ if __name__ == '__main__':
     p.add_argument('--pgn', type=Path, default=ROOT / 'data/LumbrasGigaBase_OTB_Complete.pgn')
     p.add_argument('--db', type=Path, default=ROOT / 'data/lumbra.sqlite')
     p.add_argument('--bits', type=int, default=27, help='Candidate memory: 2 * 2**bits bytes')
+    p.add_argument('--minimum-rating', type=int, choices=[0, 2200], default=0)
     p.add_argument('--threshold', type=int, default=100)
     p.add_argument('--limit', type=int, help='Sample games only; use a separate database')
     args = p.parse_args()
     with open(str(args.db) + '.lock', 'w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        run(args.pgn, args.db, args.bits, args.threshold, args.limit)
+        run(args.pgn, args.db, args.bits, args.threshold, args.limit, minimum_rating=args.minimum_rating)
 
 
-def decorate(data, path, reference='all'):
+def decorate(data, path, reference='all', strong_path=None):
     """Overlay local reference data; keep cached Lichess statistics untouched."""
     state, rows, retained = None, {}, False
     if Path(path).exists():
@@ -250,6 +256,21 @@ def decorate(data, path, reference='all'):
             move[field + '_percent'] = n / denominator * 100 if n is not None and denominator else None
         move['reference_percent'] = move['lumbra2200_percent' if reference == '2200' else 'lumbra_percent']
     data['local_totals'] = [count(rows[''], strong) for strong in (False, True)] if ready else [None, None]
+    if strong_path and Path(strong_path).exists():
+        import copy
+        strong_data = decorate(copy.deepcopy(data), strong_path, '2200')
+        data['strong_import'] = strong_data['import']
+        if not state or state['phase'] != 'complete':
+            strong_moves = {m['uci']: m for m in strong_data['moves']}
+            for move in data['moves']:
+                strong_move = strong_moves[move['uci']]
+                move['lumbra2200'] = strong_move['lumbra2200']
+                move['lumbra2200_percent'] = strong_move['lumbra2200_percent']
+                if reference == '2200': move['reference_percent'] = move['lumbra2200_percent']
+            data['local_totals'][1] = strong_data['local_totals'][1]
+            if reference == '2200':
+                data['parents'] = strong_data['parents']
+                data['local_retained'] = strong_data['local_retained']
     field = 'lumbra2200' if reference == '2200' else 'lumbra'
     data['moves'].sort(key=lambda m: (-(m[field] or 0), -(m['lichess'] or 0), m['san']))
     return data
