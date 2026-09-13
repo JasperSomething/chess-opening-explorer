@@ -10,3 +10,5 @@ data/*.pgn
 data/*.sha256
 data/*audit*.json
 data/.extract-*/
+
+*.candidates

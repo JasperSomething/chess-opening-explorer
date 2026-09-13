@@ -331,3 +331,19 @@ dialog button {
     padding: 0 18px;
   }
 }
+
+select {
+  font: inherit;
+  color: #edf3e9;
+  background: #2a3930;
+  border: 1px solid #405140;
+  border-radius: 7px;
+  padding: 7px;
+  max-width: 100%;
+  margin: 8px 0;
+}
+.analysis { min-width: 0; }
+.board-card { align-self: start; }
+table { font-size: 13px; }
+th, td { white-space: nowrap; }
+a { color: var(--green); }

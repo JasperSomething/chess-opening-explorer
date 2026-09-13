@@ -16,7 +16,7 @@
         <div>
           <div class="eyebrow">FOLLOW THE POSITION</div>
           <h1>Explore your next move.</h1>
-          <p>Master practice meets the moves people actually play.</p>
+          <p>Compare all Lumbra games with play by opponents rated 2200+.</p>
         </div>
         <div id="coverage" class="coverage"></div>
       </div>
@@ -45,8 +45,9 @@
           <div class="panel continuations">
             <div class="section-title">
               <h2>Continuations</h2>
-              <span class="badge">● Major ≥20%</span>
+              <span class="badge">● Lichess ≥20%</span>
             </div>
+            <label>Order and opening frequency: <select id="reference"><option value="all">Lumbra · All games</option><option value="2200">Lumbra · Both players 2200+</option></select></label>
             <p id="notice" class="muted"></p>
             <label class="toggle"
               ><input type="checkbox" id="legal" /> Include unrecorded legal
@@ -57,17 +58,18 @@
                 <thead>
                   <tr>
                     <th>Move</th>
-                    <th>Masters</th>
+                    <th>All games</th>
+                    <th>Both 2200+</th>
+                    <th>Opening %</th>
                     <th>Lichess</th>
-                    <th>Frequency</th>
+                    <th>Lichess %</th>
                   </tr>
                 </thead>
                 <tbody id="moves"></tbody>
               </table>
             </div>
             <p class="footnote">
-              Frequency is the share of recorded next moves, across all rating
-              groups and speeds in the Lichess rated-game Explorer.
+              Opening % follows the selected Lumbra group. Both 2200+ requires a recorded rating of at least 2200 for each player. Lichess % covers all rating groups and speeds. Each game contributes its first continuation per position. Source: <a href="https://lumbrasgigabase.com/en/download-in-pgn-format-en/">Lumbra’s Gigabase</a> (CC BY-NC-SA 4.0). Its OTB collection also contains some correspondence, rapid and blitz records.
             </p>
           </div>
         </section>

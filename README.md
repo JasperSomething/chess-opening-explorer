@@ -1,103 +1,94 @@
 # Opening Atlas
 
-**Transition in progress:** the full Lumbra OTB archive has been downloaded. The user selected all OTB games with no Elo cutoff. The bulk graph importer is not implemented yet; the app still uses the original Lichess Masters source. See [HANDOFF.md](HANDOFF.md) for the exact implementation state and next steps.
+A local chess opening explorer using Python, python-chess, SQLite and a plain HTML/JavaScript interface. Compare **all Lumbra OTB games** with **games where both players are rated 2200+**, alongside Lichess Opening Explorer continuation statistics.
 
-A local Python / python-chess / SQLite opening explorer. No JavaScript build system, CDN, chess service in the browser, or PGN corpus download. The UI reads the local database; only the crawler contacts Lichess.
+The complete source download contains **10,355,488 games**. Downloading it is separate from importing it: the UI reports the import phase and only labels the local graph complete after both passes and graph construction finish. Lichess enrichment has separate coverage and can remain pending after the local reference is complete.
 
-## Run
+## Launch
 
-Python 3.10+ on Linux/macOS (crawler locking uses `fcntl`).
+Python 3.10+ on Linux/macOS (process locking uses `fcntl`).
 
 ```sh
 git clone https://github.com/JasperSomething/chess-opening-explorer.git
 cd chess-opening-explorer
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/python explorer.py serve
+.venv/bin/python explorer.py serve --db data/lumbra-lichess.sqlite --port 8766
 ```
 
-Open http://127.0.0.1:8765. The supplied `openings.sqlite` contains real API data and may still be filling. The UI and `status` explicitly distinguish partial coverage from a finished graph. The server binds only to loopback.
+Open http://127.0.0.1:8766/. The server listens only on your computer. Databases and source games are **not included in Git**. The UI works during import; unavailable counts are `—`, and incomplete counts are explicitly labelled.
 
-Click a piece and a destination, or click a continuation. Use Back/Forward, the arrow keys, or a move in the line. Choosing a different move after Back starts a new branch. Flip changes the board orientation. Promotions offer all four pieces. Unrecorded legal moves are playable, but unfetched statistics display `—`, not invented zero counts.
+Both Lumbra count columns stay visible. The selector changes sorting and the **Opening %** denominator between all games and both players 2200+. It preserves the current move sequence. Lichess counts, percentages and the >=20% highlight are separate. Click continuations or board squares; Back/Forward and arrow keys navigate your line. Identical board positions share statistics across different move orders.
 
-## Authentication and proof of concept
+## Download and build the local reference
 
-Both current endpoints require a Lichess personal access token with **no scopes**. Generate it at https://lichess.org/account/oauth/token. Keep it in an environment variable or a private local file; do not put it in this repository.
+Obtain the OTB Complete PGN archive from [Lumbra’s Gigabase](https://lumbrasgigabase.com/en/download-in-pgn-format-en/). This project’s downloaded release is 2026-07-08. Preserve publisher attribution and the data’s CC BY-NC-SA 4.0 terms; source metadata is in `data/lumbra-source.json`. The publisher’s OTB collection contains some correspondence, blitz and rapid records; see [DATA-AUDIT.md](DATA-AUDIT.md).
 
 ```sh
-.venv/bin/python explorer.py poc --token-file /path/to/private/LICHESS_TOKEN
+.venv/bin/pip install -r requirements-data.txt
+.venv/bin/python scripts/extract_lumbra.py data/lumbra-otb-2026-07-08.7z
+# Small verification build; never confuse this with full coverage:
+.venv/bin/python lumbra.py --db data/sample.sqlite --limit 20000 --bits 24
+# Full build, or resume the same build:
+.venv/bin/python lumbra.py
 ```
 
-Alternatively set `LICHESS_TOKEN` locally and omit `--token-file`. It is never persisted in SQLite, logs, or frontend assets. The supported endpoint is `https://explorer.lichess.org`; the older `.ovh` address also returned 401 without authentication during verification.
+Default input: `data/LumbrasGigaBase_OTB_Complete.pgn`. Default output: `data/lumbra.sqlite`. No ply limit is applied. The two passes replay the full mainline of every accepted game. This is a substantial offline job; leave the computer awake. It checkpoints automatically; repeat the same command after interruption. Only one importer may write the same generation.
 
-The bounded POC fetches the initial position and every qualifying first-ply position, then samples four lines through ply four: open games, Queen's Gambit, and two transposing move orders. It checks response counts and legal moves, requests 256 versus 512 moves to detect truncation, and compares continuation sets across two move orders and direct canonical FEN queries. Successful verification is recorded in SQLite and is required before `crawl` will run. All POC data is reusable. It does **not** claim that a partial database is complete.
+The first pass uses a **256 MiB counting candidate filter**. Hash collisions may admit extra candidates, but never discard a qualifying position. The second pass computes **exact counts keyed by full canonical FEN**. No approximate counts are published. Finally, the importer traverses the closure of continuations played in at least 100 games from the standard starting board. Every continuation at retained positions is counted, including moves below 100. It does not discard a game’s remaining moves when its early move order is rare; later transpositions still count.
 
-## Build or resume the full graph
+Candidate checkpoints occur every 20,000 games; exact counts and their input checkpoint commit together every 1,000 games. An interrupted candidate batch may be replayed, which can only add false-positive candidates. An interrupted exact batch rolls back. Keep the `.candidates` file with an unfinished import. The importer stops with an error before free disk falls below 3 GiB.
+
+### Counting semantics
+
+- A game contributes once to a position total, and its **first outgoing continuation** from that position is counted once. Repetition does not inflate game counts. Terminal games enter position totals but not next-move denominators.
+- Both 2200+ requires numeric WhiteElo and BlackElo values >=2200. Missing ratings stay in all games but are excluded from this subset.
+- Only standard-start, standard-chess games with known results and no reported move-parse errors are accepted. Unknown results, invalid games and nonstandard starts are counted in the exclusion report.
+- Source game records are counted individually; the importer does not independently deduplicate the publisher’s collection.
+- Position identity retains placement, turn, castling and legally capturable en-passant; it ignores move counters.
+- The retained graph is based on the all-games threshold. The 2200+ view compares the same positions; it does not discard all-games positions with fewer than 100 strong-player games.
+
+Progress and exclusions are stored as JSON in the database’s `state` table and reported by the UI. Final accepted totals can be lower than the header-only inventory because move validation happens during import.
+
+## Lichess enrichment
+
+Only aggregated statistics for local retained positions are requested. There is no download of the full Lichess PGN corpus.
+
+If you already have this project’s verified `openings.sqlite` API cache:
 
 ```sh
-.venv/bin/python explorer.py crawl --token-file /path/to/private/LICHESS_TOKEN
-.venv/bin/python explorer.py status
+.venv/bin/python enrich_lumbra.py --seed openings.sqlite --token-file /path/to/private/LICHESS_TOKEN
 ```
 
-No depth or position limit is applied by default. Crawl stops only when every discovered qualifying position has both sources, or on a reported error/interruption. `Ctrl-C` is safe; repeat the command to resume. One database admits only one crawler. SQLite WAL allows the UI to remain open during collection.
-
-For a bounded run:
+The seed is copied using SQLite backup only if `data/lumbra-lichess.sqlite` does not yet exist. This preserves the original database and reuses compatible snapshots. The command requires a completed, nonsample local graph and a verified API cache. For a fresh installation, create the cache with the bounded live proof of concept first:
 
 ```sh
-.venv/bin/python explorer.py crawl --token-file /path/to/private/LICHESS_TOKEN --limit 100
-.venv/bin/python explorer.py crawl --token-file /path/to/private/LICHESS_TOKEN --max-ply 5
+.venv/bin/python explorer.py poc --db data/lumbra-lichess.sqlite --token-file /path/to/private/LICHESS_TOKEN
+.venv/bin/python enrich_lumbra.py --token-file /path/to/private/LICHESS_TOKEN
 ```
 
-A depth boundary leaves deeper discovered positions queued. Removing the boundary resumes them. `--limit` counts positions completed in that invocation, not API calls. A full crawl can take many hours or days; its final size is discovered as it runs. Do not start multiple crawlers to evade rate limits.
+Alternatively set `LICHESS_TOKEN` locally. No token is stored in Git, SQLite or frontend assets. Requests are serial with at least three seconds spacing; 429 responses wait at least 60 seconds, respect Retry-After, and slow subsequent requests. Repeating enrichment fills missing snapshots without refetching cached positions. No additional Masters requests are made by `enrich_lumbra.py`.
 
-Requests are serial, normally spaced at least three seconds apart. HTTP 429 waits at least 60 seconds, honors a longer Retry-After, and increases spacing. Network/server failures retry with backoff; retries are bounded and failure preserves progress. A 401/403 stops immediately. Rate limits vary; there is no assumed universal requests-per-minute quota.
+Lichess filters remain standard rated games, all six speeds and all nine rating groups, 1952-01 through 3000-12. Each response requests 256 moves, retaining complete W/D/L statistics and raw metadata. Percentages divide continuation counts by their sum, excluding games ending at the position. See [VERIFICATION.md](VERIFICATION.md) for the original API proof of concept.
 
-## Update / rebuild
+## Rebuild and update
 
-Resume fills missing data; it deliberately does not refetch completed snapshots. For fresh counts and exact threshold re-evaluation, build a new generation, retaining the old database for use while the replacement fills:
+Resume uses the same PGN identity and settings; changed input requires a new generation:
 
 ```sh
-.venv/bin/python explorer.py poc --db updated.sqlite --token-file /path/to/private/LICHESS_TOKEN
-.venv/bin/python explorer.py crawl --db updated.sqlite --token-file /path/to/private/LICHESS_TOKEN
-.venv/bin/python explorer.py status --db updated.sqlite
-.venv/bin/python explorer.py serve --db updated.sqlite --port 8766
+.venv/bin/python lumbra.py --pgn data/new-release.pgn --db data/lumbra-next.sqlite
+.venv/bin/python enrich_lumbra.py --local data/lumbra-next.sqlite --db data/next-cache.sqlite --seed data/lumbra-lichess.sqlite --token-file /path/to/private/LICHESS_TOKEN
+.venv/bin/python explorer.py serve --local-db data/lumbra-next.sqlite --db data/next-cache.sqlite --port 8767
 ```
 
-Wait for `"complete": true` before treating a generation as complete. Snapshot timestamps are per position/source; the live API offers no atomic database-wide snapshot. Counts can change during a long crawl. This tool preserves each full response so differences can be inspected.
+Cached Lichess snapshots retain their original timestamps. For entirely fresh Lichess counts, start a fresh cache with the proof of concept instead of seeding it. Do not copy a live SQLite file directly; use its backup API or stop writers first.
 
-## Meaning of the graph and percentages
-
-* Start from standard chess. Traverse **every Masters continuation with white + draws + black >= 100** and retain its target position. The retained graph is the closure of these edges, not a collection of independent lines. All returned moves—including those below 100—are stored at retained positions. A subthreshold move is displayed and playable, but does not itself expand the crawl.
-* Position identity is piece placement, side to move, castling rights, and **legally capturable** en-passant square. Halfmove/fullmove counters are omitted. This matches the Explorer source's legal-en-passant position hashing. Repetitions and transpositions therefore share nodes; move history stays in the browser. This is an opening-statistics graph, not a repetition/50-move adjudicator.
-* Masters uses the documented full default range starting in **1952**, with no upper year filter. The API rejects `since=0` and `since=1000`. This is the API's Masters corpus, not all historical chess games.
-* Lichess explicitly includes all nine rating buckets and all six speeds, standard rated games, from 1952-01 through 3000-12. It covers what the aggregated Explorer indexes, not every game ever played on Lichess (for example, not casual games).
-* `frequency = continuation count / sum(all returned continuation counts)`. This is the conditional probability of the next recorded move. Games ending at this position are excluded from the denominator. Position totals and per-move white/draw/black counts remain available, allowing a different denominator if desired.
-* A move is major when its unrounded frequency is **>=20%**. Display rounding never determines the highlight.
-* `moves=256` requests more moves than standard chess can legally offer, avoiding the default top-12 truncation. The POC additionally compares a larger request. Full raw payloads retain auxiliary rating/opening fields when present. Top/recent game samples are explicitly disabled; these are not continuation statistics.
-
-## Files and schema
-
-`explorer.py` contains canonicalization, the HTTP client, validation, persistence, BFS crawl, POC, CLI and local HTTP server. `static/` is plain HTML/CSS/JS. `tests/` is standard-library unittest.
-
-SQLite tables:
-
-| Table | Purpose |
-|---|---|
-| `positions` | Canonical key and shortest discovered depth |
-| `snapshots` | Per-source counts, fetch time and full response JSON, keyed by position/source |
-| `moves` | Per-source UCI/SAN edge, canonical target, W/D/L and full move JSON |
-| `meta` | Filter configuration and successful POC marker |
-
-Move targets can be outside the retained graph. The target intentionally has no foreign-key constraint to `positions`; the parent does. Each response and its edge replacement commit atomically. The persistent frontier is derived from missing snapshots. A crash between Masters and Lichess requests resumes the unfinished source and reconstructs child discovery.
-
-Configuration is stored and checked on open; changing filters requires a new database. Keep database, WAL and SHM together while running, or stop writers before copying the SQLite file.
-
-## Tests
+## Inspect and test
 
 ```sh
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-Tests cover thresholds, legal en-passant and castling identity, transpositions, cycles, restart/depth extension, interrupted source fetching, invalid responses, terminal-game denominators, missing versus zero statistics, illegal moves, 401 and 429 behavior. No live API calls or token are needed for these tests.
+`lumbra.py` owns the local import, candidate filter and UI overlay. `enrich_lumbra.py` handles the Lichess-only queue. `explorer.py` contains normalization, the API client, the legacy Masters crawler, cache persistence and HTTP server. `static/` has no build step or external dependencies.
 
-Official references: [Masters API](https://raw.githubusercontent.com/lichess-org/api/master/doc/specs/tags/openingexplorer/masters.yaml), [Lichess API](https://raw.githubusercontent.com/lichess-org/api/master/doc/specs/tags/openingexplorer/lichess.yaml), [rate-limit guidance](https://lichess.org/page/api-tips), [Explorer implementation](https://github.com/lichess-org/lila-openingexplorer).
+The local reference has `state`, `counts` (full canonical position + UCI, six W/D/L counts), `retained`, and `links` tables. The empty UCI denotes position totals. The separate API cache retains `positions`, `snapshots`, `moves` and `meta` tables. Original `explorer.py crawl/status` commands describe the legacy Masters graph, not completion of the local Lumbra import.

@@ -257,7 +257,7 @@ def position(db, sequence):
             'continuation_total': denominator, 'status': status(db)}
 
 
-def serve(path, port):
+def serve(path, port, local_path=None):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             url = parse.urlparse(self.path)
@@ -267,6 +267,9 @@ def serve(path, port):
                     with contextlib.closing(connect(path)) as db:
                         db.execute('BEGIN')
                         data = position(db, seq.split(',') if seq else [])
+                    from lumbra import decorate
+                    reference = parse.parse_qs(url.query).get('reference', ['all'])[0]
+                    data = decorate(data, local_path or ROOT / 'data/lumbra.sqlite', reference)
                     content, mime = json.dumps(data).encode(), 'application/json'
                 else:
                     name = {'/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css'}.get(url.path)
@@ -290,6 +293,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=['poc','crawl','status','serve'])
     parser.add_argument('--db', default=str(ROOT / 'openings.sqlite'))
+    parser.add_argument('--local-db', type=Path, default=ROOT / 'data/lumbra.sqlite', help='Lumbra reference database for the UI')
     parser.add_argument('--token-file', type=Path)
     parser.add_argument('--max-ply', type=int)
     parser.add_argument('--limit', type=int, help='Maximum positions this run; resume with same DB')
@@ -298,7 +302,7 @@ def main():
     args = parser.parse_args()
     if args.delay < 0 or (args.max_ply is not None and args.max_ply < 0) or (args.limit is not None and args.limit < 1):
         parser.error('Invalid negative argument or nonpositive limit')
-    if args.command == 'serve': return serve(args.db, args.port)
+    if args.command == 'serve': return serve(args.db, args.port, args.local_db)
     with contextlib.closing(connect(args.db)) as db:
         if args.command == 'status': print(json.dumps(status(db), indent=2)); return
         token = args.token_file.read_text().strip() if args.token_file else os.environ.get('LICHESS_TOKEN','').strip()

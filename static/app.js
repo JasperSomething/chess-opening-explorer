@@ -26,7 +26,7 @@ async function load() {
   const id = ++requestId;
   try {
     const r = await fetch(
-      "/api/position?moves=" + history.slice(0, cursor).join(","),
+      "/api/position?moves=" + history.slice(0, cursor).join(",") + "&reference=" + $("#reference").value,
     );
     if (!r.ok) throw Error(await r.text());
     const next = await r.json();
@@ -143,25 +143,20 @@ function render() {
     data.parents > 1
       ? "↗ Shared position · " + data.parents + " recorded incoming positions"
       : "Move history belongs to this line; statistics belong to the position.";
-  let s = data.status;
-  $("#coverage").textContent =
-    (s.complete ? "Complete graph" : "Partial database") +
-    " · " +
-    fmt(s.masters_fetched) +
-    " / " +
-    fmt(s.positions) +
-    " Masters positions";
-  $("#notice").textContent = !data.sources.masters
-    ? "This position has not been fetched. Legal moves remain available."
-    : !data.sources.lichess
-      ? "Masters loaded. Lichess statistics are pending."
-      : fmt(data.sources.masters.total) +
-        " master games · " +
-        fmt(data.sources.lichess.total) +
-        " Lichess games";
+  const imp = data.import;
+  const complete = imp.phase === "complete" && !imp.sample;
+  $("#coverage").textContent = complete
+    ? "Lumbra complete · " + fmt(imp.accepted) + " games · " + fmt(imp.retained_positions) + " opening positions"
+    : "Lumbra import · " + ({candidates: "Pass 1/2: finding positions", exact: "Pass 2/2: counting games", finalizing: "Building opening graph", complete: "Sample only", not_started: "Waiting to start"}[imp.phase] || imp.phase) + " · " + fmt(imp.games) + " games" + (imp.progress_percent ? " · " + imp.progress_percent.toFixed(1) + "% of this pass" : "");
+  const checkpointAge = (Date.now() / 1000) - (imp.updated || imp.started || Date.now() / 1000);
+  const stalled = !complete && !imp.sample && checkpointAge > 600 ? " No saved progress for " + Math.floor(checkpointAge / 60) + " minutes; check the import log. " : "";
+  $("#notice").textContent = stalled +
+    (imp.sample ? "Sample only: these counts cover a limited set of games. " : complete ? (data.local_totals[0] === null ? "Outside imported frequent-position coverage. " : "") : "Import in progress: local counts are incomplete. ") +
+    "All games: " + fmt(data.local_totals[0]) + " · Both 2200+: " + fmt(data.local_totals[1]) +
+    (data.sources.lichess ? " · Lichess loaded" : " · Lichess statistics pending");
   $("#moves").replaceChildren();
   for (let m of data.moves) {
-    if (!$("#legal").checked && !m.masters && !m.lichess) continue;
+    if (!$("#legal").checked && !m.lumbra && !m.lumbra2200 && !m.lichess) continue;
     let tr = document.createElement("tr");
     tr.className = m.major ? "major" : "";
     let move = document.createElement("td"),
@@ -170,9 +165,9 @@ function render() {
     button.onclick = () => play(m.uci);
     move.append(button);
     tr.append(move);
-    for (let n of [m.masters, m.lichess]) {
+    for (let n of [m.lumbra, m.lumbra2200, m.reference_percent, m.lichess]) {
       let td = document.createElement("td");
-      td.textContent = fmt(n);
+      td.textContent = tr.children.length === 3 ? (n === null ? "—" : n.toFixed(1) + "%") : fmt(n);
       tr.append(td);
     }
     let td = document.createElement("td");
@@ -189,7 +184,7 @@ function render() {
   if (!$("#moves").children.length) {
     let tr = document.createElement("tr"),
       td = document.createElement("td");
-    td.colSpan = 4;
+    td.colSpan = 6;
     td.textContent = data.moves.length
       ? "No recorded moves. Enable legal moves or use the board."
       : "No legal moves.";
@@ -198,7 +193,7 @@ function render() {
   }
   $("#fen").textContent = data.key;
   $("#details").textContent =
-    "Canonical FEN omits move counters and nonlegal en-passant targets. " +
+    "Lumbra reference: " + (data.local_retained ? "retained opening position. " : "not yet in the completed retained graph. ") + "Canonical FEN omits move counters and nonlegal en-passant targets. " +
     Object.entries(data.sources)
       .map(([s, v]) => s + " fetched " + v.fetched)
       .join(" · ") +
@@ -213,12 +208,14 @@ $("#flip").onclick = () => {
   flipped = !flipped;
   renderBoard();
 };
+$("#reference").onchange = () => load();
+setInterval(() => { if (!busy && (data?.import?.phase !== "complete" || !data?.sources?.lichess)) load(); }, 30000);
 $("#legal").onchange = () => render();
 $("#cancel-promotion").onclick = () => $("#promotion").close();
 document.addEventListener("keydown", (e) => {
   if (
     $("#promotion").open ||
-    ["INPUT", "BUTTON"].includes(document.activeElement.tagName)
+    ["INPUT", "BUTTON", "SELECT"].includes(document.activeElement.tagName)
   )
     return;
   if (e.key === "ArrowLeft") jump(cursor - 1);
