@@ -235,3 +235,49 @@ CREATE TABLE IF NOT EXISTS position_flow (
     flags            TEXT NOT NULL,
     PRIMARY KEY (position_key, source)
 );
+
+-- Structural flow graph (research task A): mass transferred between pawn-structure
+-- families by observed structural transitions. Pawn moves are irreversible, so this
+-- graph is a DAG and each game crosses an edge at most once: mass is a probability.
+CREATE TABLE IF NOT EXISTS structure_edge (
+    source_key      TEXT NOT NULL,
+    destination_key TEXT NOT NULL,
+    uci             TEXT NOT NULL,
+    source          TEXT NOT NULL,
+    mass            REAL NOT NULL,     -- family-conditioned probability of this transition
+    from_boards     INTEGER,
+    from_entry_mass REAL,
+    from_mean_ply   REAL,
+    PRIMARY KEY (source_key, destination_key, uci, source)
+);
+CREATE INDEX IF NOT EXISTS structure_edge_source ON structure_edge(source_key);
+CREATE INDEX IF NOT EXISTS structure_edge_dest ON structure_edge(destination_key);
+
+-- Maturity components per pawn-structure family (research task B). Every component
+-- is stored on its own; `maturity_index` is the mean of the depth-adjusted
+-- residuals of the strategic components and is reported beside its parts.
+CREATE TABLE IF NOT EXISTS structure_maturity (
+    structure_id          TEXT NOT NULL,
+    source                TEXT NOT NULL,
+    boards                INTEGER,
+    entry_mass            REAL,
+    ply_mean              REAL,
+    minors_white          REAL,
+    minors_black          REAL,
+    castled_white         REAL,
+    castled_black         REAL,
+    centre_left_white     REAL,
+    centre_left_black     REAL,
+    centre_files_white    REAL,
+    centre_files_black    REAL,
+    dwell_mean            REAL,
+    retention_3           REAL,
+    reconvergence         REAL,
+    effective_successors  REAL,
+    source_families       INTEGER,
+    incoming_mass         REAL,
+    residual_json         TEXT NOT NULL,
+    maturity_index        REAL,     -- depth-adjusted residual (ahead of schedule)
+    development_level     REAL,     -- absolute: minors + castling + centre commitment
+    PRIMARY KEY (structure_id, source)
+);
