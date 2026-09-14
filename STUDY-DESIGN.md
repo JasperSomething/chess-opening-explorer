@@ -341,6 +341,12 @@ where the ranking could move), with the Lichess cloud doing the heavy lifting:
 | 2b | local Stockfish fallback only where the cloud has no evaluation meeting the depth threshold, single thread, depth 18 | ≤ 120 searches ≈ 2–4 min, one core |
 | 3 | local multi-PV (depth 18, up to 8 moves, WDL on) on the top 20 by cp-priority, to recompute regret in WDL terms and report the rank correlation | 20 searches ≈ 1 min |
 
+**Single writer.** One analysis run at a time: `study/run_scandinavian.py` takes a
+non-blocking exclusive lock on `<analysis db>.lock` and exits with status 2 if
+another run holds it. Two concurrent runs would double the cloud requests and
+interleave metric rows — this happened once during development and is now
+prevented (`tests/test_study_singleton.py`).
+
 Ceiling for this experiment: **~1,500 cloud requests and ~150 single-threaded
 Stockfish searches**, i.e. well under half an hour of wall clock with one core
 touched — small enough to run while the ingestion importers keep the machine

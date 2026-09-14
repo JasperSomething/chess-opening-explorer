@@ -1,4 +1,5 @@
 """Analysis database plumbing: schema, runs, read-only ingestion access."""
+import fcntl
 import json
 import sqlite3
 import sys
@@ -31,6 +32,23 @@ SOURCE_POLICY = {
     'local2200complete': {'coverage': 'partial', 'expand': False},
     'allgames': {'coverage': 'partial', 'expand': False},
 }
+
+
+def acquire_singleton(path):
+    """Take the single-writer lock for one analysis run.
+
+    Two analysis processes sharing the same database both fetch cloud
+    evaluations and both write metrics; the work is doubled and the results are
+    interleaved. A non-blocking exclusive lock makes the second process fail
+    fast instead. The lock is released automatically when the process exits.
+    """
+    handle = open(str(path), 'w')
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        raise RuntimeError(f'another analysis run already holds {path}')
+    return handle
 
 
 def connect(path=DEFAULT_ANALYSIS_DB, create=True):

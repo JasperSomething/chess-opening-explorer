@@ -356,6 +356,14 @@ def main():
     parser.add_argument('--verbose', action='store_true')
     args = parser.parse_args()
 
+    lock_path = str(args.db) + '.lock'
+    try:
+        # The handle must stay referenced for the whole process: closing it would
+        # release the flock immediately.
+        _lock_handle = studydb.acquire_singleton(lock_path)
+    except RuntimeError as error:
+        print(f'refusing to start: {error}')
+        return 2
     db = studydb.connect(args.db)
     run_id = studydb.start_run(db, 'scandinavian-1e4-d5', vars(args),
                                notes='proof-of-concept study run')
@@ -523,4 +531,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())
