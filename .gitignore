@@ -13,3 +13,4 @@ data/.extract-*/
 
 *.candidates
 data/atlas-PIPELINE-STATUS.txt
+analysis/
