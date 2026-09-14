@@ -1,9 +1,9 @@
 :root {
   color-scheme: dark;
-  --bg: #101816;
-  --panel: #1b2723;
-  --muted: #9dac9f;
-  --green: #bddc91;
+  --bg: #211b17;
+  --panel: #302720;
+  --muted: #c0ad98;
+  --accent: #e2b879;
 }
 * {
   box-sizing: border-box;
@@ -11,14 +11,14 @@
 body {
   margin: 0;
   background: var(--bg);
-  color: #edf3e9;
+  color: #f5ecde;
   font:
     15px/1.5 system-ui,
     sans-serif;
 }
 header {
   height: 80px;
-  border-bottom: 1px solid #2e3b33;
+  border-bottom: 1px solid #493a2e;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -26,7 +26,7 @@ header {
 }
 .brand {
   font-size: 32px;
-  color: var(--green);
+  color: var(--accent);
   display: flex;
   align-items: center;
   gap: 12px;
@@ -34,13 +34,13 @@ header {
 .brand span {
   font-size: 21px;
   font-weight: 650;
-  color: #edf3e9;
+  color: #f5ecde;
 }
 .local,
 .eyebrow {
   font-size: 11px;
   letter-spacing: 2px;
-  color: var(--green);
+  color: var(--accent);
 }
 main {
   max-width: 1220px;
@@ -78,7 +78,7 @@ p {
 .board-card,
 .panel {
   background: var(--panel);
-  border: 1px solid #304035;
+  border: 1px solid #514131;
   border-radius: 14px;
   padding: 20px;
 }
@@ -90,15 +90,15 @@ p {
 }
 button {
   font: inherit;
-  background: #2a3930;
-  border: 1px solid #405140;
+  background: #443527;
+  border: 1px solid #70563c;
   border-radius: 7px;
-  color: #edf3e9;
+  color: #f5ecde;
   padding: 7px 12px;
   cursor: pointer;
 }
 button:hover {
-  background: #43563a;
+  background: #614a34;
 }
 button:disabled {
   opacity: 0.35;
@@ -130,10 +130,10 @@ button:focus-visible {
   min-height: 0;
 }
 .light {
-  background: #dddcc5 !important;
+  background: #f0d9b5 !important;
 }
 .dark {
-  background: #789078 !important;
+  background: #b58863 !important;
 }
 .piece-white {
   color: #fffdf3;
@@ -143,14 +143,14 @@ button:focus-visible {
     -1px 0 #111;
 }
 .piece-black {
-  color: #17221c;
+  color: #241b14;
   text-shadow: 0 1px 1px #ffffff70;
 }
 .coord {
   position: absolute;
   bottom: 3px;
   left: 4px;
-  color: #273e2d;
+  color: #503924;
   font: 10px system-ui;
   text-shadow: none;
 }
@@ -163,7 +163,7 @@ button:focus-visible {
   width: 24%;
   height: 24%;
   border-radius: 50%;
-  background: #294c36aa;
+  background: #51371fcc;
   pointer-events: none;
 }
 .navigation {
@@ -200,8 +200,8 @@ button:focus-visible {
   border-color: transparent;
 }
 #line button.active {
-  background: #bddc91;
-  color: #17221c;
+  background: #e2b879;
+  color: #241b14;
 }
 .muted {
   color: var(--muted);
@@ -219,8 +219,8 @@ h2 {
 }
 .badge {
   font-size: 11px;
-  color: var(--green);
-  background: #2e402d;
+  color: var(--accent);
+  background: #503b26;
   padding: 5px 8px;
   border-radius: 20px;
 }
@@ -248,7 +248,7 @@ th {
 }
 td {
   padding: 10px 5px;
-  border-top: 1px solid #334035;
+  border-top: 1px solid #514131;
 }
 th:first-child,
 td:first-child {
@@ -261,18 +261,18 @@ td button {
   font-weight: 650;
 }
 .major td {
-  color: var(--green);
+  color: var(--accent);
 }
 .bar {
   height: 3px;
-  background: #405039;
+  background: #665039;
   margin-top: 4px;
   min-width: 60px;
 }
 .bar i {
   height: 100%;
   display: block;
-  background: var(--green);
+  background: var(--accent);
 }
 .footnote {
   font-size: 11px;
@@ -292,7 +292,7 @@ code {
 dialog {
   background: var(--panel);
   color: white;
-  border: 1px solid #789078;
+  border: 1px solid #b58863;
   border-radius: 12px;
 }
 dialog button {
@@ -334,9 +334,9 @@ dialog button {
 
 select {
   font: inherit;
-  color: #edf3e9;
-  background: #2a3930;
-  border: 1px solid #405140;
+  color: #f5ecde;
+  background: #443527;
+  border: 1px solid #70563c;
   border-radius: 7px;
   padding: 7px;
   max-width: 100%;
@@ -346,4 +346,10 @@ select {
 .board-card { align-self: start; }
 table { font-size: 13px; }
 th, td { white-space: nowrap; }
-a { color: var(--green); }
+a { color: var(--accent); }
+
+header { background: #29211b; }
+.board-card, .panel { box-shadow: 0 8px 26px #100b0733; }
+#board { border: 5px solid #745237; box-shadow: 0 2px 8px #120c0870; }
+select:focus-visible { outline: 3px solid #e8c970; outline-offset: 2px; }
+input { accent-color: var(--accent); }

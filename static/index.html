@@ -47,7 +47,7 @@
               <h2>Continuations</h2>
               <span class="badge">● Lichess ≥20%</span>
             </div>
-            <label>Order moves by: <select id="reference"><option value="all">Lumbra · All games</option><option value="2200" selected>Lumbra · Both players 2200+</option></select></label>
+            <label>Game collection: <select id="reference"><option value="all">Lumbra · All games</option><option value="2200" selected>Lumbra · Both players 2200+</option></select></label>
             <p id="notice" class="muted"></p>
             <label class="toggle"
               ><input type="checkbox" id="legal" /> Include unrecorded legal
@@ -58,10 +58,8 @@
                 <thead>
                   <tr>
                     <th>Move</th>
-                    <th>All games</th>
-                    <th>All games %</th>
-                    <th>Both 2200+</th>
-                    <th>2200+ %</th>
+                    <th id="reference-count">2200+</th>
+                    <th id="reference-percent">2200+ %</th>
                     <th>Lichess</th>
                     <th>Lichess %</th>
                   </tr>
@@ -70,7 +68,7 @@
               </table>
             </div>
             <p class="footnote">
-              Each percentage uses the continuation total for its own group. The selector only changes move ordering. Both 2200+ requires a recorded rating of at least 2200 for each player. Lichess % covers all rating groups and speeds. Each game contributes its first continuation per position. Source: <a href="https://lumbrasgigabase.com/en/download-in-pgn-format-en/">Lumbra’s Gigabase</a> (CC BY-NC-SA 4.0). Its OTB collection also contains some correspondence, rapid and blitz records.
+              Each percentage uses the continuation total for its own group. The selector changes the displayed game counts, percentages and move ordering. Both 2200+ requires a recorded rating of at least 2200 for each player. Lichess % covers all rating groups and speeds. Each game contributes its first continuation per position. Source: <a href="https://lumbrasgigabase.com/en/download-in-pgn-format-en/">Lumbra’s Gigabase</a> (CC BY-NC-SA 4.0). Its OTB collection also contains some correspondence, rapid and blitz records.
             </p>
           </div>
         </section>

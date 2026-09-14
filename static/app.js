@@ -152,14 +152,20 @@ function render() {
   if (strong && !complete) {
     $("#coverage").textContent = "2200+ first · " + (strong.phase === "complete" ? "Complete" : "Pass " + (strong.phase === "candidates" ? "1/2" : "2/2")) + " · " + fmt(strong.games) + " records scanned · " + fmt(strong.accepted) + " qualifying games";
   }
+  const selectedStrong = $("#reference").value === "2200";
+  const selectedField = selectedStrong ? "lumbra2200" : "lumbra";
+  const selectedLabel = selectedStrong ? "2200+" : "All games";
+  const selectedPhase = selectedStrong && strong && !complete ? strong.phase : imp.phase;
+  $("#reference-count").textContent = selectedLabel;
+  $("#reference-percent").textContent = selectedLabel + " %";
   const countLabel = (n) => n === null ? "Pending" : fmt(n);
   $("#notice").textContent =
     (strong && !complete ? (strong.phase === "complete" ? "2200+ counts are ready. The all-games import continues separately. " : "Processing both-2200+ games first. Counts appear during its second pass and remain partial until complete. ") : complete ? "Local import complete. " : "Import in progress: counts appear in pass 2 and remain partial until complete. ") +
-    "All games: " + countLabel(data.local_totals[0]) + " · Both 2200+: " + countLabel(data.local_totals[1]) +
+    selectedLabel + ": " + countLabel(data.local_totals[selectedStrong ? 1 : 0]) +
     (data.sources.lichess ? " · Lichess loaded" : " · Lichess statistics pending");
   $("#moves").replaceChildren();
   for (let m of data.moves) {
-    if (!$("#legal").checked && !m.lumbra && !m.lumbra2200 && !m.lichess) continue;
+    if (!$("#legal").checked && !m[selectedField] && !m.lichess) continue;
     let tr = document.createElement("tr");
     tr.className = m.major ? "major" : "";
     let move = document.createElement("td"),
@@ -168,10 +174,10 @@ function render() {
     button.onclick = () => play(m.uci);
     move.append(button);
     tr.append(move);
-    for (const [n, percent] of [[m.lumbra, false], [m.lumbra_percent, true], [m.lumbra2200, false], [m.lumbra2200_percent, true], [m.lichess, false]]) {
+    for (const [n, percent] of [[m[selectedField], false], [m[selectedField + "_percent"], true], [m.lichess, false]]) {
       const td = document.createElement("td");
       td.textContent = n === null || n === undefined
-        ? (imp.phase === "candidates" && tr.children.length < 5 ? "Pending" : "—")
+        ? (selectedPhase === "candidates" && tr.children.length < 3 ? "Pending" : "—")
         : percent ? n.toFixed(1) + "%" : fmt(n);
       tr.append(td);
     }
@@ -189,7 +195,7 @@ function render() {
   if (!$("#moves").children.length) {
     let tr = document.createElement("tr"),
       td = document.createElement("td");
-    td.colSpan = 7;
+    td.colSpan = 5;
     td.textContent = data.moves.length
       ? "No recorded moves. Enable legal moves or use the board."
       : "No legal moves.";
