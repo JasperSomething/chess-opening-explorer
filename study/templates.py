@@ -161,7 +161,7 @@ def forward_transformations(db, seeds, source='local2200', max_plies=12, windows
                         counters[window][f'capture {PIECE_LETTER[piece.piece_type]}x{victim_letter}'] += flow
                     child_position = positions.get(child)
                     if child_position and child_position['structure'] != positions[key]['structure']:
-                        counters[window]['gives up the pawn structure'] += flow
+                        counters[window]['changes the pawn structure (family exit)'] += flow
                     after = board.copy(stack=False)
                     after.push(move)
                     before_open = _open_files(board)

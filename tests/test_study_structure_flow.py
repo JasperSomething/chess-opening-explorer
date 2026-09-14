@@ -160,7 +160,7 @@ class TransformationTests(unittest.TestCase):
                                                    moves=moves, fen_of=lambda k: fens[k])
         window = result['windows'][(1, 6)]
         self.assertAlmostEqual(window['moves']['pawn e2e4'], 1.0)
-        self.assertAlmostEqual(window['moves']['gives up the pawn structure'], 1.0)
+        self.assertAlmostEqual(window['moves']['changes the pawn structure (family exit)'], 1.0)
         self.assertAlmostEqual(window['moves']['piece N g8->f6'], 1.0)
         self.assertAlmostEqual(window['destinations']['N->f6'], 1.0)
 

@@ -190,6 +190,36 @@ def render(db, source='local2200', outdir=None):
         add(f"| {row['k']} | `{row['structure_id'][:8]}` | {row['coverage']:.4f} | "
             f"{row['marginal']:+.4f} | {row['entry_mass']:.3f} | {row['development_level']:.3f} | "
             f"{row['dwell']:.2f} |")
+    unselected = [row['structure_id'] for row in pool if row['structure_id'] not in selected]
+    selected_ids = set(selected)
+    marginal_only = templates.frontier(db, source=source, k_max=10, min_pawn_distance=0,
+                                       pool=pool)[0]
+    if unselected:
+        add('\nThe remaining candidates, split by *why* they are not in the frontier '
+            '(own mass vs what they would actually add):\n')
+        add('| family | entry mass | own coverage | nearest selected (pawn squares away) '
+            '| marginal next to the selection | verdict |')
+        add('|---|---|---|---|---|---|')
+        for structure in unselected:
+            own, _m = structure_flow.coverage_of_set(edges, entry, [structure], leak=leak)
+            distances = {s: (templates.pawn_distance(db, structure, s) or 99)
+                         for s in selected_ids}
+            nearest = min(distances, key=distances.get)
+            with_it, _m2 = structure_flow.coverage_of_set(edges, entry, selected + [structure],
+                                                         leak=leak)
+            gained = with_it - covered
+            verdict = ('near-duplicate of `%s`, suppressed' % nearest[:8]
+                       if distances[nearest] < 3 else
+                       ('fully subsumed by the selection' if gained < 5e-4
+                        else 'would add %.4f but was passed over' % gained))
+            add(f'| `{structure[:8]}` | {summary.get(structure, {}).get("entry_mass", 0.0):.3f} '
+                f'| {own:.4f} | `{nearest[:8]}` ({distances[nearest]}) | {gained:+.4f} | {verdict} |')
+    add('\nFrontier without duplicate suppression, for contrast:\n')
+    add('| k | family | cumulative coverage | marginal |')
+    add('|---|---|---|---|')
+    for row in marginal_only:
+        add(f"| {row['k']} | `{row['structure_id'][:8]}` | {row['coverage']:.4f} | "
+            f"{row['marginal']:+.4f} |")
     add(f'\nSelected families differ by ≥3 pawn squares '
         f'(pairwise distances: {json.dumps({f"{a[:8]}-{b[:8]}": d for (a, b), d in templates.similarity_matrix(db, selected).items()})})')
 
