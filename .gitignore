@@ -12,3 +12,4 @@ data/*audit*.json
 data/.extract-*/
 
 *.candidates
+data/atlas-PIPELINE-STATUS.txt
