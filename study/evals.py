@@ -56,18 +56,30 @@ class EvalBudget:
 
 
 class CloudClient:
-    """Lichess cloud evaluation. Public endpoint; no token required."""
+    """Lichess cloud evaluation. Public endpoint; no token required.
 
-    def __init__(self, delay=0.6, timeout=30, budget=None):
+    The endpoint rate-limits aggressively, so this client is deliberately
+    conservative: a minimum spacing between requests, honouring Retry-After, and
+    a circuit breaker. After `max_consecutive_429` refusals in a row the client
+    stops making cloud requests for the rest of the run and the caller falls back
+    to local Stockfish. A refusal is never treated as an evaluation.
+    """
+
+    def __init__(self, delay=2.0, timeout=30, budget=None, max_consecutive_429=3):
         self.delay = delay
         self.timeout = timeout
         self.budget = budget or EvalBudget()
         self.last_request = 0.0
         self.errors = 0
+        self.throttled = False
+        self.consecutive_429 = 0
+        self.max_consecutive_429 = max_consecutive_429
+        self.rate_limit_waits = 0
+        self.total_wait = 0.0
 
     def fetch(self, board, multipv=5):
-        """Return a dict with depth/pvs, or None when the position is not in the cloud."""
-        if not self.budget.cloud_ok():
+        """Return a dict with depth/pvs, or None when unavailable or refused."""
+        if self.throttled or not self.budget.cloud_ok():
             return None
         wait = self.delay - (time.time() - self.last_request)
         if wait > 0:
@@ -79,12 +91,23 @@ class CloudClient:
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 payload = json.load(response)
+            self.consecutive_429 = 0
         except urllib.error.HTTPError as error:
             if error.code == 404:
+                self.consecutive_429 = 0
                 return None                      # not analysed in the cloud: a real gap
             if error.code == 429:
-                retry = int(error.headers.get('Retry-After') or 60)
-                time.sleep(min(retry, 120))
+                self.consecutive_429 += 1
+                self.rate_limit_waits += 1
+                if self.consecutive_429 >= self.max_consecutive_429:
+                    self.throttled = True
+                    print(f'  cloud eval refused {self.consecutive_429} times in a row: '
+                          f'stopping cloud requests, local engine takes over')
+                    return None
+                retry = error.headers.get('Retry-After')
+                pause = min(int(retry), 120) if retry else 20 * self.consecutive_429
+                time.sleep(pause)
+                self.total_wait += pause
                 return None
             self.errors += 1
             return None
@@ -246,7 +269,8 @@ class EvalStore:
         self.stats['missing'] += 1
         return None
 
-    def resolve_moves(self, board, moves, multipv=5, allow_local=True, local_parent=False):
+    def resolve_moves(self, board, moves, multipv=5, allow_local=True, local_parent=False,
+                      child_multipv=1):
         """Per-move values from the mover's perspective.
 
         moves: iterable of UCI strings that were actually played at `board`.
@@ -271,7 +295,7 @@ class EvalStore:
                 child.push_uci(uci)
             except Exception:
                 continue
-            result = self.get(child, multipv=multipv, allow_local=allow_local)
+            result = self.get(child, multipv=child_multipv, allow_local=allow_local)
             if not result or not result['pvs']:
                 continue
             pv = result['pvs'][0]

@@ -31,7 +31,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from study import db as studydb           # noqa: E402
-from study import domain, evals, flow, metrics  # noqa: E402
+from study import attractors, domain, evals, flow, metrics  # noqa: E402
 from study.structures import render_pawns  # noqa: E402
 
 DEFAULT_ENGINE = str(Path.home() / '.local/opt/stockfish/stockfish/stockfish-linux-x86-64-universal')
@@ -130,11 +130,15 @@ def stage_filter(db, args):
                            'flow_flags': flow_row.get('flags') or '',
                            'n_parents_total': flow_row.get('n_parents_total'),
                            'path_count': flow_row.get('path_count')})
-    candidates.sort(key=lambda c: -(c['sources'][c['expert']]['games']))
+    # Preselection must prefer positions that actually arise in this family:
+    # raw game counts favour positions fed by outside move orders (e.g. the
+    # French transposition of 1.e4 d5 2.d4 e6), which the flow reach exposes.
+    candidates.sort(key=lambda c: (-(c.get('reach_flow') or 0.0),
+                                   -c['sources'][c['expert']]['games']))
     return candidates[:args.max_candidates]
 
 
-def stage_evaluate(db, candidates, store, args):
+def stage_evaluate(db, candidates, store, args, started=None):
     """Resolve engine values for every move that either distribution actually plays."""
     evaluated = []
     for index, cand in enumerate(candidates, 1):
@@ -145,7 +149,12 @@ def stage_evaluate(db, candidates, store, args):
         lichess_counts = {u: m['games'] for u, m in cand['lichess_moves'].items()}
         kept_e, dropped_e = metrics.filter_moves(expert_dist, counts=expert_counts)
         kept_l, dropped_l = metrics.filter_moves(lichess_dist, counts=lichess_counts)
-        needed = sorted(set(kept_e) | set(kept_l), key=lambda u: -(kept_l.get(u, 0) + kept_e.get(u, 0)))
+        # Tail pruning: a move below this combined share cannot move the metric
+        # much (its regret contribution is bounded by share x 1.0 EP), and its
+        # excluded mass is reported through eval_coverage.
+        combined = {u: kept_l.get(u, 0.0) + kept_e.get(u, 0.0) for u in set(kept_e) | set(kept_l)}
+        needed = [u for u in sorted(combined, key=lambda u: -combined[u])
+                  if combined[u] >= args.min_move_combined_share]
         # Engine budget guard: evaluate only the moves that carry real mass, and
         # keep the discarded tail visible through the coverage numbers.
         if len(needed) > args.max_moves_per_node:
@@ -159,9 +168,10 @@ def stage_evaluate(db, candidates, store, args):
                      'expert_dropped': dropped_e, 'lichess_dropped': dropped_l,
                      'move_evals': usable, 'needed': needed})
         evaluated.append(cand)
-        if args.verbose and index % 25 == 0:
-            print(f'  evaluated {index}/{len(candidates)} '
-                  f'(cloud {store.budget.cloud_requests}, local {store.budget.local_searches})')
+        if index % 10 == 0:
+            print(f'  candidate {index}/{len(candidates)} kept={len(evaluated)} '
+                  f'cloud={store.budget.cloud_requests} local={store.budget.local_searches} '
+                  f'elapsed={time.time() - started:.0f}s', flush=True)
     return evaluated
 
 
@@ -332,12 +342,13 @@ def main():
     parser.add_argument('--max-candidates', type=int, default=400)
     parser.add_argument('--min-lichess-games', type=int, default=metrics.MIN_LICHESS_GAMES)
     parser.add_argument('--max-cloud', type=int, default=2500)
-    parser.add_argument('--max-moves-per-node', type=int, default=6)
-    parser.add_argument('--max-local', type=int, default=120)
+    parser.add_argument('--max-moves-per-node', type=int, default=5)
+    parser.add_argument('--min-move-combined-share', type=float, default=0.03)
+    parser.add_argument('--max-local', type=int, default=800)
     parser.add_argument('--depth', type=int, default=18)
     parser.add_argument('--multipv', type=int, default=5)
     parser.add_argument('--cloud-depth', type=int, default=30)
-    parser.add_argument('--cloud-delay', type=float, default=0.6)
+    parser.add_argument('--cloud-delay', type=float, default=2.0)
     parser.add_argument('--main-share', type=float, default=0.10)
     parser.add_argument('--min-deviation-prob', type=float, default=0.02)
     parser.add_argument('--wdl-top', type=int, default=20)
@@ -349,7 +360,7 @@ def main():
     run_id = studydb.start_run(db, 'scandinavian-1e4-d5', vars(args),
                                notes='proof-of-concept study run')
     started = time.time()
-    print(f'run_id={run_id} analysis db={args.db}')
+    print(f'run_id={run_id} analysis db={args.db}', flush=True)
 
     if not args.skip_domain:
         print('stage 0: building domain')
@@ -373,7 +384,7 @@ def main():
     print(f'  {len(candidates)} candidates with expert + Lichess support')
 
     print('stage 2: evaluations (cloud first)')
-    evaluated = stage_evaluate(db, candidates, store, args)
+    evaluated = stage_evaluate(db, candidates, store, args, started=started)
     print(f'  {len(evaluated)} positions with >=2 evaluated moves; '
           f'cloud={budget.cloud_requests} local={budget.local_searches}')
 
@@ -383,8 +394,13 @@ def main():
     print('stage 4: opponent deviations')
     deviations = stage_deviations(db, run_id, results, store, args)
 
+    print(f'  cloud requests={budget.cloud_requests} '
+          f'rate-limit waits={cloud.rate_limit_waits} throttled={cloud.throttled}', flush=True)
     print('stage 5: structures')
     structures_stats = stage_structures(db, run_id, results, args)
+    print('stage 5b: attractors (coverage, path diversity, persistence)')
+    attractor_summary = attractors.compute(db, 'local2200', run_id)
+    print('  ', json.dumps(attractor_summary))
 
     # ---- WDL check on the top candidates (local multi-PV gives WDL for all moves at once)
     wdl_pairs = []
