@@ -213,7 +213,7 @@ def _order_flexibility(events, tids, firsts):
 
 
 def mine_family(db, structure_id, source='local2200', n=20000, window_plies=12, min_support=0.05,
-                fen_of=None, positions=None, moves=None):
+                seed=1337, fen_of=None, positions=None, moves=None):
     """Motifs for one family; ``family_lift`` is 1.0 until a pooled pass fills it in."""
     if positions is None or moves is None:
         positions, moves = structure_flow.load_graph_inputs(db, source)
@@ -222,7 +222,7 @@ def mine_family(db, structure_id, source='local2200', n=20000, window_plies=12, 
         "AND position_key IN (SELECT position_key FROM position WHERE structure_id=?)",
         (source, structure_id))}
     trajectories, diag = sample_trajectories(db, seeds, positions, moves, n=n,
-                                             window_plies=window_plies, fen_of=fen_of)
+                                             window_plies=window_plies, seed=seed, fen_of=fen_of)
     motifs = mine_motifs(trajectories, min_support=min_support)
     for motif in motifs:
         motif['family_id'] = structure_id
