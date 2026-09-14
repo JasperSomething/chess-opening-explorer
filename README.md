@@ -104,3 +104,20 @@ To build both-2200+ games first, pause the all-games importer, then run:
 ```
 
 The rating filter skips excluded games before move replay. The independent 2200+ graph uses its own >=100 threshold and is displayed while the all-games graph is incomplete. Once the full all-games graph completes, its 2200+ statistics replace the priority view, covering the larger all-games position set. No missing values from the priority build are treated as all-games counts. The default UI selection is 2200+.
+
+## Every 2200+ position (no frequency cutoff)
+
+The 2200+ view now supports a separate, complete-position index. This includes rare openings and positions later in games, even if they occur only once. The all-games reference retains its existing 100-game threshold.
+
+```sh
+# Build or resume every position from both-2200+ standard-start games:
+.venv/bin/python complete_2200.py
+# The normal server discovers data/lumbra-2200-complete.sqlite automatically:
+.venv/bin/python explorer.py serve --db data/lumbra-lichess.sqlite --port 8766
+```
+
+This importer makes one pass, filtering headers before replaying moves. It stores an exact 34-byte position key: four piece/color bitplanes, standard castling rights, side to move and legal en passant. These keys are lossless, not hashes. SQLite `edges` rows contain the key, packed move and W/D/L counts. Move zero represents a game ending at the position; summing all rows gives the position game count. Repeated positions still contribute only their first continuation per game. Source duplicates are not independently removed.
+
+Counts and source offset checkpoint together every 1,000 scanned records. The importer requires 5 GiB free at checkpoints and stops safely if disk space falls below that reserve. Keep existing databases until the replacement completes. Use a new `--db` for changed source input. For a bounded verification run, use `--limit 20000 --db data/complete-2200-sample.sqlite`; a sample is never complete coverage.
+
+During rebuilding, completed frequent-position counts stay visible. Previously unindexed positions can show clearly labelled partial counts from the new database. At completion, the new index becomes authoritative for 2200+ regardless of the all-games import state. A position absent from the completed index then means zero qualifying source games, rather than an indexing cutoff. This does not expand the Lichess API queue to every endgame position: its separate cached coverage remains visible.

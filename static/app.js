@@ -155,17 +155,40 @@ function render() {
   const selectedStrong = $("#reference").value === "2200";
   const selectedField = selectedStrong ? "lumbra2200" : "lumbra";
   const selectedLabel = selectedStrong ? "2200+" : "All games";
-  const selectedPhase = selectedStrong && strong && !complete ? strong.phase : imp.phase;
+  const selectedPhase = selectedStrong && strong ? strong.phase : imp.phase;
   $("#reference-count").textContent = selectedLabel;
   $("#reference-percent").textContent = selectedLabel + " %";
-  const countLabel = (n) => n === null ? "Pending" : fmt(n);
+  const selectedTotal = data.local_totals[selectedStrong ? 1 : 0];
+  const outsideIndex = selectedTotal === null && selectedPhase === "complete";
+  const noLocalCounts = selectedTotal === null;
+  const countLabel = (n) => n === null ? (outsideIndex ? "Not indexed" : "Pending") : fmt(n);
   $("#notice").textContent =
     (strong && !complete ? (strong.phase === "complete" ? "2200+ counts are ready. The all-games import continues separately. " : "Processing both-2200+ games first. Counts appear during its second pass and remain partial until complete. ") : complete ? "Local import complete. " : "Import in progress: counts appear in pass 2 and remain partial until complete. ") +
     selectedLabel + ": " + countLabel(data.local_totals[selectedStrong ? 1 : 0]) +
     (data.sources.lichess ? " · Lichess loaded" : " · Lichess statistics pending");
+  if (outsideIndex) {
+    $("#notice").textContent = selectedLabel + ": this position is below the 100-game indexing cutoff. Its continuation counts were not stored; this does not mean no games exist. Legal moves remain playable." +
+      (data.sources.lichess ? " Cached Lichess statistics are available independently." : " Lichess statistics have not been fetched here either.");
+  }
+  const fullIndex = data.complete_2200_import;
+  if (fullIndex) {
+    const indexComplete = fullIndex.phase === "complete" && !fullIndex.sample;
+    $("#coverage").textContent = indexComplete
+      ? "2200+ complete · Every recorded position · " + fmt(fullIndex.accepted) + " games"
+      : "Building every 2200+ position · " + fmt(fullIndex.games) + " records scanned · " + fullIndex.progress_percent.toFixed(1) + "%";
+    if (selectedStrong) {
+      const coverage = data.strong_position_coverage;
+      const explanation = coverage === "complete" ? "Complete 2200+ index, with no frequency cutoff. "
+        : coverage === "complete_frequent" ? "Complete counts for this position from the existing index. The rebuild is adding rare positions. "
+        : coverage === "partial" ? "Partial counts from the new index; more games are still being processed. "
+        : "This position is waiting for the complete-index rebuild. Missing counts do not mean zero games. ";
+      $("#notice").textContent = explanation + "2200+: " + countLabel(selectedTotal) +
+        (data.sources.lichess ? " · Lichess loaded" : " · Lichess statistics have not been fetched here.");
+    }
+  }
   $("#moves").replaceChildren();
   for (let m of data.moves) {
-    if (!$("#legal").checked && !m[selectedField] && !m.lichess) continue;
+    if (!noLocalCounts && !$("#legal").checked && !m[selectedField] && !m.lichess) continue;
     let tr = document.createElement("tr");
     tr.className = m.major ? "major" : "";
     let move = document.createElement("td"),
@@ -177,7 +200,7 @@ function render() {
     for (const [n, percent] of [[m[selectedField], false], [m[selectedField + "_percent"], true], [m.lichess, false]]) {
       const td = document.createElement("td");
       td.textContent = n === null || n === undefined
-        ? (selectedPhase === "candidates" && tr.children.length < 3 ? "Pending" : "—")
+        ? (percent && selectedTotal !== null ? "—" : tr.children.length < 3 ? (outsideIndex ? "Not indexed" : "Pending") : "—")
         : percent ? n.toFixed(1) + "%" : fmt(n);
       tr.append(td);
     }
@@ -197,7 +220,7 @@ function render() {
       td = document.createElement("td");
     td.colSpan = 5;
     td.textContent = data.moves.length
-      ? "No recorded moves. Enable legal moves or use the board."
+      ? "No recorded continuations in the available statistics. Enable legal moves or use the board."
       : "No legal moves.";
     tr.append(td);
     $("#moves").append(tr);

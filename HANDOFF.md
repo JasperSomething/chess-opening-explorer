@@ -35,3 +35,13 @@ Follow README for launch, resume, enrichment and rebuild commands. Data, candida
 ## Latest priority change
 
 User requested 2200+ first. The all-games importer is paused at its checkpoint. A chained pipeline now builds `data/lumbra-2200.sqlite` using `--minimum-rating 2200`, then resumes `lumbra.py`, then runs enrichment. UI reads the independent strong-player graph until the all-games graph is complete. Headers below 2200 or missing ratings skip move replay. There are now 18 passing offline tests. Inspect logs and state for current process progress.
+
+## Latest change: every 2200+ position
+
+User explicitly approved removing the 2200+ frequency cutoff. `complete_2200.py` builds `data/lumbra-2200-complete.sqlite` in one pass with a lossless 34-byte board-position encoding and W/D/L per outgoing move; no approximate filter and no frequency/depth cutoff. Standard-start/result/rating validation and first-continuation-per-game semantics remain unchanged. The all-games generation still has threshold 100.
+
+The active pipeline was replaced: complete-position 2200+ build first, then resume `lumbra.py`, then existing Lichess enrichment. Original 2200+ graph remains available while rebuilding. HTTP overlay preserves its exact frequent-position counts and exposes partial new counts only for previously unknown positions. On completion the new database always supplies 2200+ counts, even after the all-games generation completes.
+
+23 tests pass, including compact-key identity, rare continuations, transpositions, terminal positions, repetition semantics, atomic resumption and protection of existing finished counts. A 20,000-record benchmark accepted 1,578 games and used 3.5 MB; it is not representative of the whole corpus. Full disk footprint/runtime remain unverified. New importer stops below 5 GiB free. No candidate file is required for this importer. Full build was started; verify its state/log before claiming completion.
+
+The originally reported missing line was 1.e4 c5 2.Nc3 g6 3.Bc4. That move had 24 games in the old parent position and its child was omitted by threshold 100. The UI now distinguishes absent indexing from zero games and permits legal navigation without either source cached.

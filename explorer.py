@@ -272,6 +272,9 @@ def serve(path, port, local_path=None):
                     reference_path = Path(local_path or ROOT / 'data/lumbra.sqlite')
                     strong_path = reference_path.with_name('lumbra-2200.sqlite') if reference_path.name == 'lumbra.sqlite' else None
                     data = decorate(data, reference_path, reference, strong_path)
+                    if strong_path:
+                        from complete_2200 import overlay
+                        data = overlay(data, reference_path.with_name('lumbra-2200-complete.sqlite'), reference)
                     content, mime = json.dumps(data).encode(), 'application/json'
                 else:
                     name = {'/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css'}.get(url.path)
