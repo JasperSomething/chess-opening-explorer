@@ -28,8 +28,10 @@ PATH_CAP = 1e15
 
 def compute(db, source, verbose=True):
     positions = {row['position_key']: {'ply': row['min_ply'] if row['min_ply'] is not None else row['ply'],
-                                       'role': row['role'], 'is_entry': row['is_entry']}
-                 for row in db.execute('SELECT position_key, ply, min_ply, role, is_entry FROM position')}
+                                       'role': row['role'], 'is_entry': row['is_entry'],
+                                       'structure': row['structure_id']}
+                 for row in db.execute('SELECT position_key, ply, min_ply, role, is_entry, '
+                                       'structure_id FROM position')}
     moves = defaultdict(list)
     for row in db.execute('''SELECT parent_key, child_key, uci, games FROM provenance WHERE source=?''',
                           (source,)):
@@ -56,10 +58,13 @@ def compute(db, source, verbose=True):
     paths = defaultdict(float)
     ignored = defaultdict(float)
     leakage = defaultdict(float)
+    enter_mass = defaultdict(float)
     for key, meta in positions.items():
         if meta['is_entry']:
             flow[key] = 1.0
             paths[key] = 1.0
+            # A game that starts inside the family enters its structure at the entry.
+            enter_mass[key] = 1.0
 
     for ply in sorted(by_ply):
         for parent in by_ply[ply]:
@@ -78,6 +83,9 @@ def compute(db, source, verbose=True):
                     continue
                 flow[child] += flow[parent] * share
                 paths[child] = min(PATH_CAP, paths[child] + paths[parent])
+                if positions[parent]['structure'] != positions[child]['structure']:
+                    # This mass first enters the child's structure at the child.
+                    enter_mass[child] += flow[parent] * share
 
     count_ratio = {}
     for row in db.execute('SELECT position_key, reach_prob FROM position_source WHERE source=?',
@@ -98,10 +106,11 @@ def compute(db, source, verbose=True):
         if not reach:
             flags.append('unreachable_in_flow')
         db.execute('''INSERT OR REPLACE INTO position_flow(position_key, source, reach_flow,
-                        count_ratio, leakage, ignored_back_mass, n_parents_contributing, n_parents_total,
-                        path_count, min_ply, flags)
-                      VALUES(?,?,?,?,?,?,?,?,?,?,?)''',
-                   (key, source, reach, ratio, leakage.get(key, 0.0), ignored.get(key, 0.0),
+                        count_ratio, enter_mass, leakage, ignored_back_mass, n_parents_contributing,
+                        n_parents_total, path_count, min_ply, flags)
+                      VALUES(?,?,?,?,?,?,?,?,?,?,?,?)''',
+                   (key, source, reach, ratio, enter_mass.get(key, 0.0), leakage.get(key, 0.0),
+                    ignored.get(key, 0.0),
                     len(parents_contributing.get(key, ())), len(parents_total.get(key, ())),
                     paths.get(key, 0.0), positions[key]['ply'], ','.join(flags)))
         rows += 1

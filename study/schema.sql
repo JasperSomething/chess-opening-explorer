@@ -224,6 +224,7 @@ CREATE TABLE IF NOT EXISTS position_flow (
     source           TEXT NOT NULL,        -- whose move shares drive the flow
     reach_flow       REAL,                 -- probability a family game reaches it
     count_ratio      REAL,                 -- position games / entry games (may exceed 1)
+    enter_mass       REAL,                 -- mass that first enters this position's structure here
     leakage          REAL,                 -- share of incoming mass leaving the domain
     ignored_back_mass REAL,                -- mass arriving after the first visit
     n_parents_contributing INTEGER,        -- parents whose edge feeds the flow

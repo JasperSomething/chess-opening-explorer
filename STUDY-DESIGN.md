@@ -308,10 +308,14 @@ structure S:
 * `n_parents` — distinct parent positions, i.e. how many different move orders
   lead here;
 * `path_count` — distinct move-order paths (DP, §6);
-* `persistence` — how long games *stay* in the structure: a backwards DP over the
-  family graph computing, for each position, the expected number of consecutive
-  plies spent inside S (`D(P) = 1 + Σ_{children ∈ S} share · D(child)`), averaged
-  over the mass that enters S;
+* `persistence` — how long games *stay* in the structure, from a game-level
+  simulation: the mass that enters S is pushed along S's own move shares, and a
+  move whose child belongs to another structure exits. This yields the dwell
+  distribution directly (`mean`, `median`, `exit@1ply`, `exit@2ply`,
+  `retention(k)`). An earlier per-position expected-value DP reported 7.06 plies
+  for the queen-out family where the game-level answer is 3.13, because it
+  over-weights deep boards; the simulator from `study/attractors.py` is now the
+  single definition used by `structure_stat` and every report;
 * `n_development_signatures` — distinct piece-placement/development states inside
   S (how much variety hides behind one structure).
 
@@ -359,6 +363,45 @@ Engine: Stockfish 19 (official `sf_19` linux x86-64 build), `Threads=1`,
 skip" — never as a zero evaluation.
 
 ---
+
+## 9b. Structural families and template features (research task 3+4 output)
+
+`study/family.py` produces the per-family report (`analysis/family-<structure>.md`).
+For one exact pawn-structure family it reports, all weighted by family-conditioned
+flow: piece-square occupancy under two weightings — **formation** (`enter_mass`,
+one count per game, at the board where the family's structure first appears) and
+**presence** (`reach_flow`, the share of family board-visits, i.e. what the board
+typically looks like while the family lasts); pawn invariance and the exiting
+moves (with destination structures); development orders from the most-likely path
+per board; candidate template features split into formation invariants, lifetime
+features and **flexible slots** (a split placement is only reported if at least one
+of its top squares is not a home square, so piece multiplicity is never mistaken
+for choice); explicit exception lists with the mass each exception carries; a
+compression accounting (boards, move orders, entering mass, boards per order); and
+a counterfactual protocol whose feasibility is demonstrated from *cached*
+evaluations before any new engine work.
+
+### Knowledge classes
+
+The curriculum is kept as three separate outputs and never merged into one ranking:
+
+| class | output | backing tables |
+|---|---|---|
+| 1 decision knowledge | study-priority table (`analysis/study-report-run*.md`) | `metric` |
+| 2 deviation knowledge | opponent-deviation table, same report | `deviation` |
+| 3 structural / template knowledge | per-family report (`analysis/family-<structure>.md`) | `structure_stat`, `position_flow` |
+
+### Transit states versus strategic attractors
+
+Classification uses coverage, convergence and the dwell distribution together
+(`study/family.py::classify`): a **transit state** loses ≥ 50% of its entering
+mass on the very next move; a **strategic attractor** retains ≥ 15% after three
+plies, is reached through ≥ 5 distinct incoming edges and holds games for ≥ 2
+plies on average; anything else is intermediate. Measured on the Scandinavian
+domain, the 2.exd5 structure (96.8% coverage, 68.5% exit@1ply, median dwell 1 ply)
+is a transit state, while the queen-out family (73.6% entering mass, 9.4%
+exit@1ply, median dwell 3 plies, 172 incoming edges, 50 distinct parent boards)
+is a strategic attractor.
 
 ## 10. Opponent deviations (research task 2)
 

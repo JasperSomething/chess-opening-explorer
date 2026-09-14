@@ -28,6 +28,65 @@ import time
 from collections import defaultdict
 
 
+def exit_time_stats(members, moves, entry_masses, max_steps=20):
+    """Game-level dwell distribution inside one structure.
+
+    Mass is pushed along the structure's own move shares; a move whose child lies
+    outside the structure leaves it. This yields, per unit of entering mass, the
+    number of consecutive plies spent inside — the quantity a learner cares about.
+
+    (An earlier version estimated dwell per position as an expected value and
+    averaged over flow, which over-weights deep boards and reported 7.06 plies for
+    the queen-out family where the game-level answer is 3.13. This simulator is
+    now the single definition used by structure_stat and the family report.)
+    """
+    members = set(members)
+    current = {key: mass for key, mass in entry_masses.items() if key in members and mass > 0}
+    entry_mass = sum(current.values())
+    if not entry_mass:
+        return {'entry_mass': 0.0, 'mean_dwell': None, 'median_dwell': None,
+                'exit_first_ply': None, 'exit_within_two': None, 'retention_3': None,
+                'curve': [], 'exits': []}
+    exits, curve = [], []
+    remaining = entry_mass
+    for _step in range(max_steps):
+        nxt, left = defaultdict(float), 0.0
+        for key, mass in current.items():
+            edges = moves.get(key, [])
+            total = sum(g for _c, _u, g in edges)
+            if not total:
+                left += mass
+                continue
+            for child, _uci, games in edges:
+                share = games / total
+                if child in members:
+                    nxt[child] += mass * share
+                else:
+                    left += mass * share
+        exits.append(left)
+        remaining -= left
+        curve.append(remaining)
+        current = dict(nxt)
+        if not current:
+            # Pad so every retention(k) and exit@k is defined: mass that already
+            # left cannot return, so the remaining terms are genuinely zero.
+            while len(exits) < max_steps:
+                exits.append(0.0)
+                curve.append(0.0)
+            break
+    total_exits = sum(exits) or 1.0
+    cumulative, median = 0.0, None
+    for step, mass in enumerate(exits):
+        cumulative += mass
+        if median is None and cumulative >= total_exits / 2:
+            median = step + 1
+    return {'entry_mass': entry_mass, 'mean_dwell': sum((s + 1) * m for s, m in enumerate(exits)) / total_exits,
+            'median_dwell': median, 'exits': exits, 'curve': curve,
+            'exit_first_ply': exits[0] / total_exits if exits else None,
+            'exit_within_two': (exits[0] + exits[1]) / total_exits if len(exits) > 1 else None,
+            'retention_3': (curve[2] / entry_mass) if len(curve) > 2 and entry_mass else None}
+
+
 def compute(db, source, run_id, verbose=True):
     positions = {}
     for row in db.execute('SELECT position_key, ply, structure_id, dev_status, pieces_json '
@@ -38,6 +97,10 @@ def compute(db, source, run_id, verbose=True):
     flow = {row['position_key']: (row['reach_flow'] or 0.0)
             for row in db.execute('SELECT position_key, reach_flow FROM position_flow WHERE source=?',
                                   (source,))}
+    # Mass that first enters a position's structure here (persisted by flow.compute).
+    per_position_enter = {row['position_key']: (row['enter_mass'] or 0.0)
+                          for row in db.execute('SELECT position_key, enter_mass FROM position_flow '
+                                                'WHERE source=?', (source,))}
     paths = {row['position_key']: (row['path_count'] or 0.0)
              for row in db.execute('SELECT position_key, path_count FROM position_flow WHERE source=?',
                                    (source,))}
@@ -85,8 +148,7 @@ def compute(db, source, run_id, verbose=True):
             parents[child_meta['structure']].add(key)
             if total and child_meta['structure'] == structure and flow.get(key, 0.0):
                 from_inside += flow[key] * (games / total)
-        if flow.get(key, 0.0) > 0:
-            enter_mass[structure] += max(0.0, flow[key] - from_inside)
+        enter_mass[structure] += per_position_enter.get(key, 0.0)
 
     stats = defaultdict(lambda: {'positions': 0, 'coverage_lower': 0.0, 'coverage_sum': 0.0,
                                  'paths': 0.0, 'parents': 0, 'signatures': set()})
@@ -100,20 +162,15 @@ def compute(db, source, run_id, verbose=True):
         entry['signatures'].add((meta['dev_status'], meta['pieces']))
 
     rows = 0
+    by_structure = defaultdict(list)
+    for key, meta in positions.items():
+        by_structure[meta['structure']].append(key)
     for structure_id, entry in stats.items():
         mass_total = enter_mass.get(structure_id, 0.0)
-        members = [key for key, meta in positions.items() if meta['structure'] == structure_id]
-        if mass_total > 0:
-            persistence_mean = sum(flow.get(k, 0.0) * dwell.get(k, 1.0) for k in members) / mass_total
-        else:
-            persistence_mean = None
-        weighted = sorted(((flow.get(k, 0.0), dwell.get(k, 1.0)) for k in members), key=lambda t: t[1])
-        flow_total = sum(mass for mass, _d in weighted)
-        target, running, persistence_median = flow_total / 2 if flow_total else 0.0, 0.0, None
-        for mass, dwell_value in weighted:
-            running += mass
-            if persistence_median is None and running >= target:
-                persistence_median = dwell_value
+        members = by_structure[structure_id]
+        dwell_stats = exit_time_stats(members, moves, per_position_enter)
+        persistence_mean = dwell_stats['mean_dwell']
+        persistence_median = dwell_stats['median_dwell']
         coverage_lower = entry['coverage_lower']
         coverage_upper = min(1.0, entry['coverage_sum'])
         score = None
@@ -123,7 +180,12 @@ def compute(db, source, run_id, verbose=True):
                       'peak_reach': coverage_lower, 'enter_mass': mass_total,
                       'persistence_mean_plies': persistence_mean,
                       'persistence_median_plies': persistence_median,
-                      'max_paths': entry['paths'], 'max_parents': entry['parents'],
+                      'exit_share_first_ply': dwell_stats['exit_first_ply'],
+                      'exit_share_within_two': dwell_stats['exit_within_two'],
+                      'retention_3': dwell_stats['retention_3'],
+                      'max_paths': entry['paths'],
+                      'max_parents_per_position': entry['parents'],
+                      'distinct_parents_family': len(parents.get(structure_id, ())),
                       'n_edges_in': len(edges_in.get(structure_id, ())),
                       'n_development_signatures': len(entry['signatures'])}
         db.execute('''INSERT OR REPLACE INTO structure_stat(structure_id, source, run_id,
@@ -132,7 +194,8 @@ def compute(db, source, run_id, verbose=True):
                         n_development_signatures, attractor_score, components_json)
                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                    (structure_id, source, run_id, entry['positions'],
-                    len(edges_in.get(structure_id, ())), entry['parents'], coverage_lower,
+                    len(edges_in.get(structure_id, ())), len(parents.get(structure_id, ())),
+                    coverage_lower,
                     coverage_upper, int(coverage_lower * 1000), entry['paths'], persistence_median,
                     persistence_mean, len(entry['signatures']),
                     score, json.dumps(components)))
