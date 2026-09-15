@@ -491,7 +491,8 @@ def behavioural_reach(db, items, population='lichess', source='local2200'):
             'coverage_checked': checked}
 
 
-def compare_curricula(db, run_id=6, source='local2200', population='lichess'):
+def compare_curricula(db, run_id=6, source='local2200', population='lichess',
+                      rule_settings=None):
     """The six curricula the phase must compare, on the same value surface.
 
     Value credit is only ever given to items with a taught answer set (prescriptive
@@ -504,7 +505,7 @@ def compare_curricula(db, run_id=6, source='local2200', population='lichess'):
     """
     from study import rules as rules_module
     items = build_items(db, source, run_id, criterion='expert')
-    derived = rules_module.derive_all(db, source)
+    derived = rules_module.derive_all(db, source, settings=rule_settings)
     rule_items = rules_module.as_items(db, derived, source)
     prescriptive = [item for item in rule_items if item.get('kind') == 'prescriptive']
     recognition_items = [item for item in rule_items if item.get('kind') != 'prescriptive']
