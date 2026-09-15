@@ -424,14 +424,20 @@ def compare_per_cost(db, run_id=6, source='local2200'):
     evals = curriculum.load_evals(db)
     values = curriculum.position_values(db, evals, items)
     _rows, chosen, _best = curriculum.frontier(items, values, k_max=60)
-    buckets = defaultdict(lambda: {'value': 0.0, 'cost': 0.0, 'items': 0})
+    buckets = defaultdict(lambda: {'value': 0.0, 'cost': 0.0, 'items': 0,
+                                   'boards_unavailable': 0})
     for item in chosen:
         gain = 0.0
         for key in item['keys']:
             entry = values.get(key)
             if not entry:
                 continue
-            candidate = entry['per_item'].get(item['item_id'], 0.0)
+            # a per-item value of None means "unknown", never zero: charging it as 0.0
+            # would quietly claim a known-zero gain where the data is simply absent
+            candidate = entry['per_item'].get(item['item_id'])
+            if candidate is None:
+                buckets[item['type']]['boards_unavailable'] += 1
+                continue
             gain += entry['reach'] * candidate
         bucket = buckets[item['type']]
         bucket['value'] += gain

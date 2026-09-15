@@ -524,7 +524,7 @@ def behavioural_reach(db, items, population='auto', source='local2200'):
             'coverage_checked': checked}
 
 
-def compare_curricula(db, run_id=6, source='local2200', population='lichess',
+def compare_curricula(db, run_id=6, source='local2200', population='auto',
                       rule_settings=None):
     """The six curricula the phase must compare, on the same value surface.
 

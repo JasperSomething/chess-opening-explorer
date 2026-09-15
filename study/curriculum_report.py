@@ -129,7 +129,7 @@ def render(db, run_id=6, source='local2200', outdir=None, motif_families=3, moti
                 'cross-population transfer measurement on the evaluated positions.')
 
         if criterion == 'expert':
-            behaviour = curriculum.behavioural_reach(db, items, population='lichess', source=source)
+            behaviour = curriculum.behavioural_reach(db, items, population='auto', source=source)
             mass = behaviour['taught_mass'] + behaviour['deviation_mass']
             add(f"\nBehavioural axis (engine-free, ordinary play only): over "
                 f"{behaviour['positions']} covered positions, the ordinary population already "
