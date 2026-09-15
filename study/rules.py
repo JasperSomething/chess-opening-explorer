@@ -354,7 +354,7 @@ def as_items(db, rules, source='local2200'):
     return items
 
 
-def estimate_rule_ev(db, rules, source='local2200', population='lichess'):
+def estimate_rule_ev(db, rules, source='local2200', population='auto'):
     """Expected-value credit for rules. Prescriptive rules only.
 
     Recognition-only rules are returned with `ev_per_board: None` and an explicit
@@ -377,7 +377,8 @@ def estimate_rule_ev(db, rules, source='local2200', population='lichess'):
         for key in scope:
             _role, fen = curriculum.position_role(db, key)
             scores = evals.get(fen)
-            dist_pop = curriculum.load_distributions(db, key, population)
+            dist_pop = (curriculum.load_population(db, key)[1] if population == 'auto'
+                        else curriculum.load_distributions(db, key, population))
             dist_strong = curriculum.load_distributions(db, key, source)
             if not scores or not dist_pop or not dist_strong:
                 missing += 1

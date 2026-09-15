@@ -89,6 +89,32 @@ def load_distributions(db, position_key, source):
         (position_key, source))}
 
 
+POPULATION_PREFERENCE = ('existing_local_lichess_cache', 'lichess')
+
+
+def load_population(db, position_key, sources=POPULATION_PREFERENCE):
+    """The best available ordinary-play distribution at a position.
+
+    Two sources can both hold a distribution for the same position: the older
+    `lichess` import and the local cache enrichment. They are *alternatives*, never
+    merged — merging two snapshots of the same population would double-count games.
+    The source with more games wins; ties go to the preferred order.
+
+    Returns (source_name, {uci: share}, total_games); (None, {}, 0) when no source
+    has a distribution, so "absent" stays distinguishable from "zero".
+    """
+    best = (None, {}, 0)
+    for name in sources:
+        rows = list(db.execute('''SELECT uci, share, games FROM move_source
+                                  WHERE position_key=? AND source=?''', (position_key, name)))
+        if not rows:
+            continue
+        total = sum(row['games'] or 0 for row in rows)
+        if total > best[2]:
+            best = (name, {row['uci']: row['share'] for row in rows}, total)
+    return best
+
+
 def load_reach(db, source='local2200'):
     reach = {}
     for row in db.execute('''SELECT position_key, reach_flow, enter_mass FROM position_flow
@@ -334,7 +360,7 @@ def build_items(db, source='local2200', run_id=6, criterion='metric'):
 
 
 # ------------------------------------------------------------------ valuation
-def position_values(db, evals, items, source='local2200', population='lichess',
+def position_values(db, evals, items, source='local2200', population='auto',
                     answer_source='local2200'):
     """Per-position expected loss of the population distribution and of item answers.
 
@@ -352,7 +378,12 @@ def position_values(db, evals, items, source='local2200', population='lichess',
         scores = evals.get(fen)
         if not scores:
             continue
-        dist_pop = load_distributions(db, key, population)
+        if population == 'auto':
+            pop_source, dist_pop, pop_games = load_population(db, key)
+        else:
+            pop_source = population
+            dist_pop = load_distributions(db, key, population)
+            pop_games = None
         dist_exp = load_distributions(db, key, answer_source)
         if not dist_pop:
             continue
@@ -363,6 +394,7 @@ def position_values(db, evals, items, source='local2200', population='lichess',
         best = pop_result.best_ep
         entry = {'loss_pop': pop_result.regret, 'best': best,
                  'loss_expert': exp_result.regret if exp_result else None,
+                 'population_source': pop_source, 'population_games': pop_games,
                  'reach': reach.get(key, {}).get('reach', 0.0),
                  'n_moves_evaluated': pop_result.n_moves,
                  'mass_evaluated': pop_result.mass_covered, 'per_item': {}}
@@ -464,7 +496,7 @@ def recognition(db, items, source='local2200'):
     return position_union_coverage(db, covered, source)
 
 
-def behavioural_reach(db, items, population='lichess', source='local2200'):
+def behavioural_reach(db, items, population='auto', source='local2200'):
     """Engine-free axis: mass of ordinary play already playing the taught answers.
 
     Returns {'taught_mass', 'deviation_mass', 'positions', 'coverage_checked'} —
@@ -477,7 +509,8 @@ def behavioural_reach(db, items, population='lichess', source='local2200'):
         if not item['answers']:
             continue
         for key in item['keys']:
-            dist = load_distributions(db, key, population)
+            dist = load_population(db, key)[1] if population == 'auto' \
+                else load_distributions(db, key, population)
             if not dist:
                 continue
             weight = reach.get(key, {}).get('reach', 0.0)

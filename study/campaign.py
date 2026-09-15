@@ -376,7 +376,7 @@ def value_of_answers(evals, scores, dist_answers, dist_pop, best, answers=None):
             'gain': loss_pop - loss_taught, 'mass_covered': total_pop}
 
 
-def estimate_template_ev(db, samples, source='local2200', population='lichess'):
+def estimate_template_ev(db, samples, source='local2200', population='auto'):
     """Flow-weighted EV of knowing each template, from cached evaluations only.
 
     EV per board = ordinary-play regret minus the regret of the moves the template
@@ -391,7 +391,8 @@ def estimate_template_ev(db, samples, source='local2200', population='lichess'):
         for key, _stratum, weight in boards:
             _role, fen = curriculum.position_role(db, key)
             scores = evals.get(fen)
-            dist_pop = curriculum.load_distributions(db, key, population)
+            dist_pop = (curriculum.load_population(db, key)[1] if population == 'auto'
+                        else curriculum.load_distributions(db, key, population))
             dist_answers = curriculum.load_distributions(db, key, source)
             if not scores or not dist_pop or not dist_answers:
                 missing += 1
