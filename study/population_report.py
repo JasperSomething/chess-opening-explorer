@@ -133,6 +133,7 @@ def render(options):
     actuals = acquisition_actuals(*options.logs)
     coverage = joint_coverage(db, bars=options.bars)
     candidates = prescriptive_rules_all_bars(db, bars=options.bars)
+    by_id = {rule['rule_id']: rule for rule in candidates}
     value = template_value.per_burden_dimension(db, candidates)
     bars_of = {rule['rule_id']: ','.join(rule['bars']) for rule in candidates}
     for row in value['rules']:
@@ -237,7 +238,7 @@ def render(options):
                          f"{('%.2f' % stats['top3_share_of_positive_total']) if stats['top3_share_of_positive_total'] is not None else '—'} |")
         lines.append('\nPer-board gains, rule by rule (reach, gain):\n')
         for row in available:
-            detail = template_value.rule_board_gains(db, _rule_by_id(db, row['rule_id']))
+            detail = template_value.rule_board_gains(db, by_id[row['rule_id']])
             pairs = ', '.join(f"({board['reach']:.3f}, {board['gain']:+.4f})"
                               for board in sorted(detail['boards'],
                                                   key=lambda b: -b['reach']))
@@ -253,14 +254,6 @@ def render(options):
                                for bar, entry in coverage['bars'].items()},
                       'rules_with_ev': [row['rule_id'] for row in available]}, indent=1))
     db.close()
-
-
-def _rule_by_id(db, rule_id):
-    for rule in rules.derive_all(db):
-        if rule['rule_id'] == rule_id:
-            return rule
-    return {'rule_id': rule_id, 'structure_id': '?', 'kind': 'prescriptive',
-            'answers': [], 'condition': {'role': None}, 'coverage': 0.0, 'n_exceptions': 0}
 
 
 def main():
