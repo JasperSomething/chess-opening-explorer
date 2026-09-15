@@ -489,3 +489,76 @@ class SchemaTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ImportJobsTests(unittest.TestCase):
+    """The JSONL -> ledger path that lets the worker box run without the database."""
+
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp())
+        self.db = sqlite3.connect(self.dir / 'ledger.sqlite')
+        self.db.row_factory = sqlite3.Row
+        self.bundle = self.dir / 'jobs.jsonl'
+
+    def tearDown(self):
+        self.db.close()
+
+    def _bundle(self, lines):
+        with open(self.bundle, 'w', encoding='utf-8') as handle:
+            for line in lines:
+                handle.write(json.dumps(line) + '\n')
+
+    def test_a_bundle_round_trips_and_is_idempotent(self):
+        job = {'job_id': remote.job_id_for('fen-a', remote.MULTIPV, 5_000_000, 'sf-test'),
+               'fen': 'fen-a', 'multipv': remote.MULTIPV, 'nodes_budget': 5_000_000,
+               'engine_version': 'sf-test', 'tier': 'A', 'campaign': 'phase1',
+               'attempts': 0, 'position_key': b'\x01\x02'.hex()}
+        self._bundle([job])
+        first = remote.import_jobs(self.db, self.bundle)
+        self.assertEqual(first['imported'], 1)
+        self.assertEqual(first['ledger_total'], 1)
+        second = remote.import_jobs(self.db, self.bundle)
+        self.assertEqual(second['imported'], 0)
+        self.assertEqual(second['already_present'], 1)
+        self.assertEqual(second['ledger_total'], 1)
+        row = self.db.execute('SELECT * FROM engine_job').fetchone()
+        self.assertEqual(row['state'], 'pending')
+        self.assertEqual(row['nodes_budget'], 5_000_000)   # nodes travel as the budget
+        self.assertEqual(bytes(row['position_key']), b'\x01\x02')
+
+    def test_malformed_lines_are_counted_not_dropped_silently(self):
+        self._bundle([{'fen': 'no-job-id'}, {'job_id': 'x', 'fen': 'f', 'multipv': 5,
+                                             'nodes_budget': 1, 'engine_version': 'v'}])
+        result = remote.import_jobs(self.db, self.bundle)
+        self.assertEqual(result['imported'], 1)
+        self.assertEqual(result['malformed'], 1)
+
+    def test_a_done_job_is_not_resurrected_by_a_reimport(self):
+        job = {'job_id': remote.job_id_for('fen-b', remote.MULTIPV, 25_000_000, 'sf-test'),
+               'fen': 'fen-b', 'multipv': remote.MULTIPV, 'nodes_budget': 25_000_000,
+               'engine_version': 'sf-test', 'tier': 'B'}
+        self._bundle([job])
+        remote.import_jobs(self.db, self.bundle)
+        self.db.execute("UPDATE engine_job SET state='done' WHERE job_id=?", (job['job_id'],))
+        self.db.commit()
+        remote.import_jobs(self.db, self.bundle)
+        state = self.db.execute('SELECT state FROM engine_job WHERE job_id=?',
+                                (job['job_id'],)).fetchone()['state']
+        self.assertEqual(state, 'done')
+
+    def test_exported_ids_survive_the_bundle_so_remote_work_counts_locally(self):
+        """A result computed on the box must be recognised by the local ledger."""
+        local = sqlite3.connect(self.dir / 'local.sqlite')
+        local.row_factory = sqlite3.Row
+        remote.ensure_schema(local)
+        remote.ensure_schema(self.db)
+        fen, nodes, version = 'fen-c', 100_000_000, 'sf-frozen'
+        job_id = remote.job_id_for(fen, remote.MULTIPV, nodes, version)
+        local.execute('''INSERT INTO engine_job(job_id, fen, multipv, nodes_budget,
+            engine_version, state, campaign, attempts) VALUES(?,?,?,?,?,'pending','phase1',0)''',
+                      (job_id, fen, remote.MULTIPV, nodes, version))
+        local.commit()
+        remote.export_jobs(local, self.bundle)
+        remote.import_jobs(self.db, self.bundle)
+        self.assertEqual(self.db.execute('SELECT job_id FROM engine_job').fetchone()['job_id'],
+                         job_id)

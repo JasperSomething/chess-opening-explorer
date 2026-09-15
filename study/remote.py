@@ -217,6 +217,53 @@ def export_jobs(db, path: str | Path) -> dict:
     return {'exported': len(rows), 'path': str(path)}
 
 
+def import_jobs(db, path: str | Path, campaign: Optional[str] = None) -> dict:
+    """Load a JSONL job bundle into a fresh ledger, exactly as exported.
+
+    This is what lets the remote worker run without the analysis database: the
+    approved sheet is exported once locally, shipped as a bundle, and imported into
+    an empty ledger on the compute box. Job ids travel with the bundle, so the
+    keying — sha1(fen|multipv|nodes_budget|engine_version) — is identical on both
+    machines and a job done remotely is recognised as done locally.
+
+    Idempotent: `INSERT OR IGNORE` against UNIQUE(fen, multipv, nodes_budget,
+    engine_version) means importing the same bundle twice writes nothing the second
+    time. Jobs already present in any state are counted as `already_present`, and a
+    job that arrives marked done is not resurrected as pending.
+    """
+    ensure_schema(db)
+    imported = already_present = malformed = 0
+    with open(path, encoding='utf-8') as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+                fields = (record['job_id'], record['fen'], int(record['multipv']),
+                          int(record['nodes_budget']), record['engine_version'])
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+                malformed += 1
+                continue
+            position_key = record.get('position_key')
+            if position_key:
+                position_key = bytes.fromhex(position_key)
+            cursor = db.execute('''INSERT OR IGNORE INTO engine_job(
+                    job_id, fen, multipv, nodes_budget, engine_version, state, position_key,
+                    tier, campaign, attempts)
+                VALUES(?,?,?,?,?,'pending',?,?,?,?)''',
+                                (*fields, position_key, record.get('tier'),
+                                 campaign or record.get('campaign') or DEFAULT_CAMPAIGN,
+                                 int(record.get('attempts') or 0)))
+            if cursor.rowcount == 1:
+                imported += 1
+            else:
+                already_present += 1
+    db.commit()
+    return {'imported': imported, 'already_present': already_present, 'malformed': malformed,
+            'ledger_total': db.execute('SELECT COUNT(*) FROM engine_job').fetchone()[0]}
+
+
 def import_results(db, path: str | Path) -> dict:
     """Fold a worker's JSONL results back into the ledger and the eval cache.
 
@@ -656,6 +703,11 @@ def main(argv: Optional[list[str]] = None) -> None:
     imp = sub.add_parser('import', help='fold JSONL results back into the ledger')
     imp.add_argument('--in', dest='in_path', type=Path, required=True)
 
+    imp_jobs = sub.add_parser('import-jobs',
+                              help='load a shipped JSONL job bundle into a fresh ledger')
+    imp_jobs.add_argument('--in', dest='in_path', type=Path, required=True)
+    imp_jobs.add_argument('--campaign', default=None)
+
     sub.add_parser('stats', help='print the ledger summary')
 
     worker = sub.add_parser('worker', help='run the queue')
@@ -717,6 +769,10 @@ def main(argv: Optional[list[str]] = None) -> None:
     elif args.command == 'import':
         db = studydb.connect(args.db, create=False)
         print(json.dumps(import_results(db, args.in_path), indent=1))
+        db.close()
+    elif args.command == 'import-jobs':
+        db = studydb.connect(args.db, create=False)
+        print(json.dumps(import_jobs(db, args.in_path, args.campaign), indent=1))
         db.close()
     elif args.command == 'stats':
         db = studydb.connect(args.db, create=False)
