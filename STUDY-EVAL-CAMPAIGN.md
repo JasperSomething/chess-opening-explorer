@@ -247,3 +247,167 @@ for CPU with the importer, so it is scheduled after the importer reports complet
   campaign fills, and it says so rather than reporting a zero effect.
 * Data-quality finding worth keeping: `position_source.games` is internally
   inconsistent and must not be used for projections; the flow is used instead.
+
+--------------------------------------------------------------------------------
+
+# Revision 2 — remote execution, the position_source audit, and rule semantics
+
+## 10. Remote / parallel runner design
+
+`study/remote.py`. The 1,200 positions are independent, so execution moves to a
+rented CPU machine without touching the experiment.
+
+**Invariants copied, not re-derived.** The runner imports `campaign.NODE_TIERS`
+(5M / 25M / 100M) and `campaign.MULTIPV` (5). It never redefines or rescales them.
+The candidate sheet is the same sheet: jobs are planned from
+`evaluation_candidate WHERE selected=1`, and the tier promotion rule is unchanged
+(promotion is decided by the measured tier-A result, not by rank).
+
+**One job, one idempotency key.** `job_id = sha1(fen|multipv|nodes_budget|engine_version)`
+with `UNIQUE(fen, multipv, nodes_budget, engine_version)` on the ledger. A job that
+exists in *any* state — pending, leased, done, failed — is not planned again, and the
+same position at a different node budget is a different job. Depth achieved is
+metadata stored on the job; nodes is the budget, the key, and the stopping condition.
+
+**Server-free coordination, two modes.**
+
+* *Queue mode* (default): a shared SQLite ledger. `claim_next` is a single
+  conditional `UPDATE` — the job is leased only if it is pending or its lease has
+  expired — and the row count decides the winner, so two workers cannot take the
+  same job. Leases expire after `lease_seconds` (default 900) and
+  `release_expired` returns them to pending. Killing a worker loses at most the jobs
+  it currently holds.
+* *Shard mode*: `export_jobs` writes JSONL, workers run offline, `import_results`
+  merges back. Importing the same file twice changes nothing the second time, and
+  results are also written into the existing `eval` cache so current consumers see
+  them.
+
+One coordination process per machine (one ledger, one counter, one lock); workers
+within it run concurrently.
+
+## 11. Benchmark procedure (topology selection)
+
+`benchmark_topologies(binary, topologies, fens, nodes_per, repeat)` runs each
+topology — `{'workers': 8, 'threads_per_worker': 1}` versus
+`{'workers': 4, 'threads_per_worker': 2}`, plus any others — launching the workers,
+searching every position at exactly `nodes_per` nodes with MultiPV 5, timing from
+first start to last finish, and reporting per topology: `wall_seconds`,
+`total_nodes`, `aggregate_nps = total_nodes / wall_seconds`, `mean_depth_achieved`,
+and `cores` from `os.cpu_count()`. The list is sorted by `aggregate_nps` and `best`
+names the winner.
+
+Procedure for the rented machine: take `fens` from the top of the candidate sheet
+(mixed tiers), run `--nodes 1000000 --fens 8` over both topologies, and pick the
+winner by aggregate nodes/second — not by workers per core. Reported locally:
+**505,000 nps single-thread**, which is the reference the topology has to beat.
+
+## 12. `position_source.games` audit
+
+Semantics, established from the writer (`study/domain.py:218-226`): the column holds
+the source database's **published global population** for a position, and
+`reach_prob = games / entry_games` is that source's published probability of
+reaching the position. It is a global position-population quantity, **not**
+family-local transition traffic. The 8.2% of links where a child claims more games
+than one of its parents is consistent with that reading: a position reached by many
+move orders has a large global population even when one particular parent move is
+rare (worst case 141,121 against a parent with 48).
+
+| site | use | classification | action |
+|---|---|---|---|
+| `domain.py:218-226` | writer: published global count and ratio | definitional (global) | unchanged; semantics documented |
+| `flow.py:91-93` | `reach_prob` as `count_ratio` to flag `fed_from_outside_family` | safe: global quantity compared against the family flow, diagnostic only | unchanged, comment added |
+| `run_scandinavian.py:111-118` | `lichess['games']` as a support floor, presence test | safe: global sample-size gate | unchanged |
+| `run_scandinavian.py:185-196` | `games` for confidence thresholds (≥300 / ≥5000) | safe: global sample size | unchanged |
+| `run_scandinavian.py:189-191` | `reach_prob` as a reach fallback in `StudyPriority` | safe but silently mixed with flow reach | **fixed**: `reach_source` now records `position_flow.reach_flow` or `published_global_ratio:<source>`, plus a flag when the fallback is used |
+| `run_scandinavian.py:301-305` | per-position `mass` for the compression baseline, preferring `local2200` and falling back across sources | **unsafe**: global counts from different populations mixed as if they were transition traffic | **replaced** with `position_flow.reach_flow`; positions outside the flow are reported as unknown, not zero |
+| `family.py:734-736` | availability gate + `other_games` display column | display-only | gate now uses `coverage_state` explicitly; column relabelled `other_population_kind='global_published'` |
+| `run_scandinavian.py:45` | `load_sources` (report display) | display-only | unchanged |
+| `trace.py:317` | deliberately avoided for projections | safe by refusal | unchanged |
+| analysis scripts (ad hoc, this session) | domain-size projections | **unsafe, already corrected** | projections now come from the flow |
+
+Net: one unsafe computational use replaced, one silent provenance gap closed, one
+display label made honest, and four safe uses documented as safe. The ingestion
+database was not touched.
+
+## 13. Recognition versus prescriptive templates
+
+`study/rules.py`. A rule is now an explicit object:
+
+```
+IF structural_family = S AND role = R [AND feature F = value] -> answer set A
+```
+
+with `support` (flow mass share where strong play's board answer is inside A),
+`strict_support` (share where the board's own answer set equals A exactly),
+`coverage`, `applicability` (share of the role's mass the condition selects),
+`exceptions` (boards where strong play chose outside A, with their mass and the move
+it chose instead), `competing` (the moves that compete with A and their mass), and
+`derivation` (source, share floor, game floor, aggregation method). The two kinds:
+
+* `prescriptive` — names one or more moves to play. **Only these earn EV.**
+* `recognition_only` — orientation. Charged its learning burden; EV is `None` with a
+  reason, and `None` is never rendered as zero.
+
+Two mechanisms enforce the separation, and both were added because the code got it
+wrong first:
+
+1. In the value layer, an item with no answer set is recorded as `None`, never as
+   `0.0`. A taught loss of zero means *perfect play*, so scoring recognition
+   knowledge as zero granted it the entire value axis and made orientation items top
+   the frontier. This is exactly the failure the distinction exists to prevent.
+2. In the comparison, value is the **reduction** of the ordinary-play loss:
+   `retained = Σ reach · max(0, loss_population − min_i loss_i)`, with the learner
+   using the best item at a position. The earlier version maximised the taught loss,
+   which inverted both the selection order and the meaning of "value retained".
+
+A rule is only an instruction for the side to move, so families are partitioned by
+role before any rule is derived.
+
+## 14. How many templates actually admit a defensible action rule?
+
+Top single answer per (family × side to move) over the 8 mature families, measured on
+flow mass: 0.22, 0.27, 0.33, 0.34, 0.36, 0.37, 0.37, 0.37, 0.39, 0.44, 0.49, 0.51,
+0.56, 0.57, 0.57, 0.59. Best two-answer set: 0.43 to 0.89.
+
+| bar | single-move rules | ≤2-move rules (matched strictly) |
+|---|---|---|
+| ≥0.30 | 14 of 16 scopes, 8 families | 16 of 16 scopes |
+| ≥0.40 | 7 of 16 scopes, 4 families | 16 of 16 scopes |
+| ≥0.50 | 5 of 16 scopes, 3 families | 15 of 16 scopes |
+| ≥0.60 | 0 of 16 scopes, 0 families | 11 of 16 scopes, 6 families |
+
+Answer to the question as asked, with the bar declared: under a strict bar of **one
+taught move covering at least 60% of the side-to-move's flow mass, no mature family
+qualifies (0 of 8)**. At 50% it is **3 of 8 families**; at 40%, 4 of 8. A two-move
+answer set covering 60% exists for 6 of 8 families but requires strict matching, and
+the single run that survives every requirement is `2cf89575` as black with A = {d6b6},
+support 1.00, applicability 0.17 — i.e. a narrow condition, not a family-wide rule.
+
+The substantive finding: **the mature families are predominantly recognition
+knowledge, not action rules.** That is precisely why the fairness fix matters — a
+template-versus-exact-decision comparison would otherwise have credited templates for
+moves they do not actually specify.
+
+## 15. The six curricula, ready to compare
+
+`curriculum.compare_curricula` produces the required table on one shared value
+surface with one shared denominator (the population loss is a property of the domain,
+not of how much a curriculum covers):
+
+| curriculum | items | burden | recognition | evaluated positions | recovery |
+|---|---|---|---|---|---|
+| ordinary_baseline | 0 | 0 | 0.000 | 0 | 0.000 |
+| exact_decisions_only | 25 | 50 | 1.000 | 13 | 0.447 |
+| prescriptive_templates_only | 16 | 268 | 0.429 | 0 | — (no evaluated board in scope yet) |
+| deviations_only | 20 | 54 | 0.007 | 5 | 0.000 |
+| hybrid_templates_plus_exceptions | 36 | 322 | 0.436 | 5 | 0.000 |
+| engine_informed_ceiling | 80 | 493 | 1.000 | 57 | 0.447 |
+
+Read with the eval gap in mind: the ceiling currently equals the decisions-only
+curriculum because nothing else has an evaluated board in scope. Two further
+observations that are findings rather than artefacts: deviation items sit on
+very low-reach positions (≤0.22% of games each, 13 of 20 non-zero, total recognition
+0.7%), so the exception class cannot carry much EV as currently scoped; and the
+prescriptive-template arm has 16 items and a burden of 268 against 25 items and a
+burden of 50 for the exact-decision arm, which is the cost side of the comparison
+this phase is meant to settle.

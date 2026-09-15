@@ -729,11 +729,19 @@ def classify(mean_dwell, median_dwell, components, incoming_edges):
 
 
 def compare_sources(db, family, expert='local2200', other='lichess'):
+    """Expert vs ordinary move distributions on the same boards.
+
+    Audit note: `position_source.games` is used ONLY as an availability gate and as
+    a display column (the source's published global population of the position). It
+    is never treated as transition traffic: the comparison itself uses `move_source`
+    shares, which are family-local. A position whose coverage_state is 'absent' or
+    'zero' is skipped rather than counted as zero games.
+    """
     rows = []
     for key, meta in family['positions'].items():
         coverage = db.execute('SELECT coverage_state, games FROM position_source '
                               'WHERE position_key=? AND source=?', (key, other)).fetchone()
-        if not coverage or coverage['coverage_state'] == 'absent' or not coverage['games']:
+        if not coverage or coverage['coverage_state'] in ('absent', 'zero'):
             continue
         expert_moves = {r['uci']: r for r in db.execute(
             'SELECT uci, san, share, games FROM move_source WHERE position_key=? AND source=?',
@@ -748,7 +756,8 @@ def compare_sources(db, family, expert='local2200', other='lichess'):
                    for u in set(expert_moves) | set(other_moves))
         rows.append({'position_key': key, 'ply': meta['ply'], 'enter_mass': meta['enter'],
                      'expert_games': sum(r['games'] for r in expert_moves.values()),
-                     'other_games': coverage['games'], 'total_variation': diff / 2,
+                     'other_games': coverage['games'],  # published global population
+                     'other_population_kind': 'global_published', 'total_variation': diff / 2,
                      'expert_top': max(expert_moves.values(), key=lambda r: r['share'])['san'],
                      'other_top': max(other_moves.values(), key=lambda r: r['share'])['san']})
     rows.sort(key=lambda r: -r['enter_mass'])

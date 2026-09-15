@@ -187,8 +187,13 @@ def stage_metrics(db, run_id, candidates, args):
         sources = cand['sources']
         expert_row, lichess_row = sources[cand['expert']], sources[LICHESS_SOURCE]
         reach = cand.get('reach_flow')
+        reach_source = 'position_flow.reach_flow'
         if reach is None:
+            # Fallback only: the source's PUBLISHED GLOBAL ratio. That is a global
+            # position-population quantity, never family-local transition traffic, so
+            # the provenance is recorded instead of being silently mixed with flow.
             reach = expert_row['reach_prob']
+            reach_source = f'published_global_ratio:{cand["expert"]}'
         coverage = min(r_l.mass_covered, r_e.mass_covered)
         confidence = 'low'
         if expert_row['games'] >= 300 and lichess_row['games'] >= 5000 and coverage >= 0.90:
@@ -196,6 +201,8 @@ def stage_metrics(db, run_id, candidates, args):
         elif expert_row['games'] >= 100 and lichess_row['games'] >= 1000 and coverage >= 0.80:
             confidence = 'medium'
         flags = []
+        if reach_source != 'position_flow.reach_flow':
+            flags.append('reach_from_published_global_ratio')
         if coverage < metrics.MIN_EVAL_COVERAGE:
             flags.append('low_eval_coverage')
         if cand['expert'] == 'masters':
@@ -224,7 +231,7 @@ def stage_metrics(db, run_id, candidates, args):
                     else next(iter(cand['move_evals'].values())).source,
                     min((v.depth or 0) for v in cand['move_evals'].values()) or None,
                     coverage, len(cand['move_evals']), lichess_row['games'], expert_row['games'],
-                    None, None, None, r_l.regret, r_e.regret, gap, js, reach, cand['expert'],
+                    None, None, None, r_l.regret, r_e.regret, gap, js, reach, reach_source,
                     expert_row['entry_games'], None, priority, confidence, ','.join(flags)))
     db.commit()
     return results
@@ -296,13 +303,24 @@ def stage_structures(db, run_id, results, args):
     struct_positions = defaultdict(list)
     for row in db.execute('SELECT position_key, ply, structure_id, dev_status, pieces_json FROM position'):
         struct_positions[row['structure_id']].append(dict(row))
-    # mass per position from the strongest available expert source
-    mass = {}
-    for row in db.execute('''SELECT position_key, source, games, entry_games, reach_prob
-                             FROM position_source WHERE source IN ('local2200','masters','lichess')'''):
-        current = mass.get(row['position_key'])
-        if current is None or (row['source'] == 'local2200'):
-            mass[row['position_key']] = row['reach_prob'] or 0.0
+    # mass per position from the verified family-conditioned flow.
+    #
+    # Audit note (position_source.games): that column holds the source database's
+    # GLOBAL published population for a position, so a child can legitimately have
+    # more games than one of its parents when the position is also reached by other
+    # move orders (8.2% of links look non-monotone for that reason). Mixing global
+    # counts across sources as if they were transition traffic is therefore unsafe.
+    # The flow is the verified quantity here: start mass 1.0 at the entry, each
+    # position's reach = sum over parents of reach * share within the family.
+    mass = {row[0]: (row[1] or 0.0) for row in db.execute(
+        'SELECT position_key, reach_flow FROM position_flow WHERE source=?', ('local2200',))}
+    missing_flow = [row[0] for row in db.execute(
+        '''SELECT position_key FROM position WHERE position_key NOT IN
+           (SELECT position_key FROM position_flow WHERE source='local2200')''')]
+    if missing_flow:
+        # never silently zero: a position outside the flow is reported as unknown
+        for key in missing_flow:
+            mass.pop(key, None)
     edges = defaultdict(list)
     for row in db.execute('SELECT child_key, parent_key, uci, games FROM provenance WHERE source=?',
                           ('local2200',)):

@@ -87,6 +87,12 @@ def compute(db, source, verbose=True):
                     # This mass first enters the child's structure at the child.
                     enter_mass[child] += flow[parent] * share
 
+    # `count_ratio` is the source database's PUBLISHED GLOBAL reach probability for
+    # the position (position_source.reach_prob = games / entry_games within that
+    # source). Audit classification: safe global position-population use — it is
+    # compared against the family-conditioned flow to flag positions whose global
+    # population is larger than the family flow explains ('fed_from_outside_family').
+    # It must never be read as family-local transition traffic.
     count_ratio = {}
     for row in db.execute('SELECT position_key, reach_prob FROM position_source WHERE source=?',
                           (source,)):

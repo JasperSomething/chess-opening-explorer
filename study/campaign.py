@@ -351,7 +351,7 @@ def template_samples(db, source='local2200', per_template=30, min_boards=20, see
 
 
 # --------------------------------------------------------------- template value
-def value_of_answers(evals, scores, dist_answers, dist_pop, best):
+def value_of_answers(evals, scores, dist_answers, dist_pop, best, answers=None):
     """EP loss of the ordinary distribution and of a taught answer set, at one board.
 
     Both losses are measured against the same baseline `best` (the best evaluated
@@ -364,7 +364,8 @@ def value_of_answers(evals, scores, dist_answers, dist_pop, best):
     normalised_pop, total_pop = metrics.renormalise(pop_moves)
     loss_pop = sum(prob * max(0.0, best - scores[uci]['ep_wp'])
                    for uci, prob in normalised_pop.items())
-    taught = {u: dist_answers.get(u, 0.0) for u in scores if u in dist_answers}
+    taught = {u: 1.0 for u in answers if u in scores} if isinstance(answers, (set, list, tuple)) \
+        else {u: dist_answers.get(u, 0.0) for u in scores if u in dist_answers}
     if not taught or sum(taught.values()) <= 0:
         return {'loss_pop': loss_pop, 'loss_taught': None, 'gain': None,
                 'mass_covered': total_pop}

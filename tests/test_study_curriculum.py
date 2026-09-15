@@ -79,15 +79,31 @@ class FrontierTests(unittest.TestCase):
             'p3': {'reach': 0.5, 'loss_pop': 0.10, 'per_item': {'c': 0.03}},
         }
 
-    def test_overlap_is_a_maximum_not_a_sum(self):
+    def test_overlap_is_a_best_item_not_a_sum(self):
+        """Value is the reduction of the ordinary-play loss, so taught losses are
+        compared against `loss_pop` and the best item wins the position."""
         rows, chosen, best = curriculum.frontier(self.items(), self.values(), k_max=10)
-        # item b covers only p1 and teaches the same answer as a: it must earn nothing
         by_id = {row['item_id']: row for row in rows}
         self.assertIn('a', by_id)
+        # item b teaches the same answer as a at p1, so once a is in it earns nothing
         self.assertNotIn('b', by_id)
-        # a = 0.4*0.02 + 0.1*0.02, c = 0.5*0.03
-        self.assertAlmostEqual(by_id['a']['marginal_value'], 0.010)
-        self.assertAlmostEqual(by_id['c']['marginal_value'], 0.015)
+        # a: 0.4*(0.10-0.02) + 0.1*(0.10-0.02) = 0.040
+        self.assertAlmostEqual(by_id['a']['marginal_value'], 0.040)
+        # c: 0.5*(0.10-0.03) = 0.035
+        self.assertAlmostEqual(by_id['c']['marginal_value'], 0.035)
+
+    def test_an_item_without_answers_earns_nothing(self):
+        """Recognition knowledge costs burden and must never earn value: a missing
+        answer set is unknown (None), not a taught loss of zero (perfect play)."""
+        items = self.items()
+        recognition = {'item_id': 'r', 'type': 'orientation', 'label': 'r', 'keys': ['p1'],
+                       'answers': [], 'coverage': 0.5}
+        recognition['complexity'] = curriculum.complexity({'positions': 1, 'boards': 1,
+                                                          'conditions': 1, 'exact_moves': 0})
+        values = self.values()
+        values['p1']['per_item']['r'] = None
+        rows, chosen, _achieved = curriculum.frontier(items + [recognition], values, k_max=10)
+        self.assertNotIn('r', {row['item_id'] for row in rows})
 
     def test_retained_value_is_monotone_and_capped_by_the_baseline(self):
         rows, chosen, best = curriculum.frontier(self.items(), self.values(), k_max=10)
@@ -95,10 +111,11 @@ class FrontierTests(unittest.TestCase):
         self.assertEqual(retained, sorted(retained))
         baseline = curriculum.baseline(self.values())
         self.assertLessEqual(retained[-1], baseline['lost_population'] + 1e-9)
+        self.assertAlmostEqual(retained[-1], 0.075)     # a and c together
 
-    def test_greedy_prefers_the_larger_gain(self):
+    def test_greedy_prefers_the_larger_loss_reduction(self):
         rows, _chosen, _best = curriculum.frontier(self.items(), self.values(), k_max=10)
-        self.assertEqual(rows[0]['item_id'], 'c')      # 0.015 beats 0.010
+        self.assertEqual(rows[0]['item_id'], 'a')       # 0.040 beats 0.035
 
 
 class EntropyTests(unittest.TestCase):

@@ -286,7 +286,13 @@ def decision_items(db, source='local2200', run_id=6, top=25, criterion='metric')
 
 
 def exception_items(db, source='local2200', run_id=6, top=20):
-    """Opponent deviations that deserve a specific answer."""
+    """Opponent deviations that deserve a specific answer.
+
+    Scope is the position AFTER the deviation, not the position before it: the
+    response is only playable once the opponent has committed. Scoping it at the
+    parent would credit an answer that is not legal there, which is what the first
+    version did (and produced exactly zero value for every deviation).
+    """
     reach = load_reach(db, source)
     items = []
     for row in db.execute('''SELECT position_key, uci, san, prob_used, concession_wp, class,
@@ -294,6 +300,12 @@ def exception_items(db, source='local2200', run_id=6, top=20):
                              FROM deviation WHERE run_id=? AND class IN ('inaccurate','punishable')
                              ORDER BY deviation_priority DESC LIMIT ?''', (run_id, top)):
         key = row['position_key']
+        child = db.execute('''SELECT child_key FROM provenance
+                              WHERE parent_key=? AND uci=? LIMIT 1''',
+                           (key, row['uci'])).fetchone()
+        child_key = child[0] if child else None
+        if child_key is not None:
+            key = child_key
         items.append({
             'type': 'exception', 'label': f"deviation {key.hex()[:12]} {row['san']}",
             'scope_kind': 'deviation', 'scope_id': f"{key.hex()}:{row['uci']}",
@@ -355,10 +367,22 @@ def position_values(db, evals, items, source='local2200', population='lichess',
                  'n_moves_evaluated': pop_result.n_moves,
                  'mass_evaluated': pop_result.mass_covered, 'per_item': {}}
         for item in covering:
-            answers = item['answers']
-            taught = {u: dist_exp.get(u, 0.0) for u in answers if u in scores}
-            if not taught or sum(taught.values()) <= 0:
-                entry['per_item'][item['item_id']] = 0.0
+            # The taught answer set is modelled as equally weighted alternatives: the
+            # learner plays one of the taught moves and the model does not claim to
+            # know which. Weighting by the strong distribution instead would give a
+            # deviation's prescribed punishment weight zero whenever strong play
+            # happens not to have chosen it, which is exactly when it matters most.
+            #
+            # An item with NO answer set (orientation, recognition-only) is recorded as
+            # None, never as 0.0: a taught loss of zero means perfect play, so scoring
+            # recognition knowledge as 0.0 would hand it the entire value axis. This is
+            # the mechanism that keeps recognition knowledge out of the EV comparison.
+            if not item['answers']:
+                entry['per_item'][item['item_id']] = None
+                continue
+            taught = {u: 1.0 for u in item['answers'] if u in scores}
+            if not taught:
+                entry['per_item'][item['item_id']] = None
                 continue
             normalised, _total = metrics.renormalise(taught)
             loss = sum(prob * max(0.0, best - scores[uci]['ep_wp'])
@@ -369,6 +393,7 @@ def position_values(db, evals, items, source='local2200', population='lichess',
 
 
 def baseline(values):
+    """Ordinary-play loss on the evaluated sample (the denominator for recovery)."""
     return {'reach_covered': sum(v['reach'] for v in values.values()),
             'lost_population': sum(v['reach'] * v['loss_pop'] for v in values.values()),
             'lost_expert': sum(v['reach'] * (v.get('loss_expert') or 0.0) for v in values.values()),
@@ -376,8 +401,18 @@ def baseline(values):
 
 
 def frontier(items, values, k_max=40, min_step=1e-4):
-    """Greedy value-per-cost selection with max-not-sum overlap accounting."""
-    best = {key: 0.0 for key in values}
+    """Greedy value-per-cost selection with best-item-not-sum overlap accounting.
+
+    Convention, stated once because it is easy to invert: `values[key]['per_item']`
+    is the expected LOSS of the item's taught answers at that position, and
+    `values[key]['loss_pop']` is the loss of ordinary play. Value is therefore the
+    REDUCTION in loss, a lower taught loss is better, and at a position covered by
+    several items the learner uses the best one — the minimum remaining loss.
+
+    (An earlier version maximised the taught-answer loss, which inverted both the
+    selection order and the meaning of `value_retained`.)
+    """
+    achieved = {key: entry['loss_pop'] for key, entry in values.items()}
     chosen, rows = [], []
     remaining = list(items)
     while remaining and len(chosen) < k_max:
@@ -388,10 +423,12 @@ def frontier(items, values, k_max=40, min_step=1e-4):
                 entry = values.get(key)
                 if not entry:
                     continue
-                candidate = entry['per_item'].get(item['item_id'], 0.0)
-                current = best.get(key, 0.0)
-                if candidate > current:
-                    gain += entry['reach'] * (candidate - current)
+                candidate = entry['per_item'].get(item['item_id'])
+                if candidate is None:
+                    continue
+                current = achieved.get(key, entry['loss_pop'])
+                if candidate < current:
+                    gain += entry['reach'] * (current - candidate)
             scored.append((gain, item))
         scored.sort(key=lambda pair: (-pair[0], pair[1]['complexity']['cost'], pair[1]['item_id']))
         gain, item = scored[0]
@@ -399,19 +436,24 @@ def frontier(items, values, k_max=40, min_step=1e-4):
             break
         for key in item['keys']:
             entry = values.get(key)
-            if entry:
-                best[key] = max(best.get(key, 0.0), entry['per_item'].get(item['item_id'], 0.0))
+            if not entry:
+                continue
+            candidate = entry['per_item'].get(item['item_id'])
+            if candidate is None:
+                continue
+            achieved[key] = min(achieved.get(key, entry['loss_pop']), candidate)
         chosen.append(item)
         remaining.remove(item)
         rows.append({
             'step': len(chosen), 'item_id': item['item_id'], 'type': item['type'],
             'label': item['label'], 'cost': item['complexity']['cost'],
             'marginal_value': gain,
-            'value_retained': sum(v['reach'] * best[key] for key, v in values.items()),
+            'value_retained': sum(v['reach'] * max(0.0, v['loss_pop'] - achieved[key])
+                                  for key, v in values.items()),
             'coverage_flow': item['coverage'], 'circular': item.get('circular', False),
             'cumulative_cost': sum(i['complexity']['cost'] for i in chosen),
         })
-    return rows, chosen, best
+    return rows, chosen, achieved
 
 
 def recognition(db, items, source='local2200'):
@@ -447,6 +489,72 @@ def behavioural_reach(db, items, population='lichess', source='local2200'):
                                       if uci not in item['answers'])
     return {'taught_mass': taught, 'deviation_mass': deviation, 'positions': positions,
             'coverage_checked': checked}
+
+
+def compare_curricula(db, run_id=6, source='local2200', population='lichess'):
+    """The six curricula the phase must compare, on the same value surface.
+
+    Value credit is only ever given to items with a taught answer set (prescriptive
+    rules, decision items, deviations). Recognition items are charged their burden
+    and earn nothing, which is what keeps the comparison honest.
+
+    Returns one row per curriculum with: items, burden (sum of complexity cost),
+    recognition coverage (flow mass), value retained, recovery fraction of the
+    ordinary-play loss on the evaluated sample, and the sample size behind it.
+    """
+    from study import rules as rules_module
+    items = build_items(db, source, run_id, criterion='expert')
+    derived = rules_module.derive_all(db, source)
+    rule_items = rules_module.as_items(db, derived, source)
+    prescriptive = [item for item in rule_items if item.get('kind') == 'prescriptive']
+    recognition_items = [item for item in rule_items if item.get('kind') != 'prescriptive']
+    decisions = [item for item in items if item['type'] == 'decision']
+    deviations = [item for item in items if item['type'] == 'exception']
+
+    curricula = {
+        'ordinary_baseline': [],
+        'exact_decisions_only': decisions,
+        'prescriptive_templates_only': prescriptive,
+        'deviations_only': deviations,
+        'hybrid_templates_plus_exceptions': prescriptive + deviations,
+        'engine_informed_ceiling': items + rule_items,
+    }
+    evals = load_evals(db)
+    # one value surface and one denominator for every curriculum: the population
+    # loss is a property of the domain, not of how much a curriculum happens to cover
+    everything = [item for chosen in curricula.values() for item in chosen]
+    shared_values = position_values(db, evals, everything, source, population) if everything else {}
+    shared_base = baseline(shared_values) if shared_values else {'lost_population': None}
+    out = []
+    for name, chosen in curricula.items():
+        values = {key: entry for key, entry in shared_values.items() if key in
+                  {k for item in chosen for k in item['keys']}} if chosen else {}
+        base = shared_base
+        # value = reduction of the ordinary-play loss; the learner uses the best item
+        achieved = {}
+        for key, entry in values.items():
+            losses = [loss for loss in
+                      (entry['per_item'].get(item['item_id']) for item in chosen
+                       if key in item['keys'])
+                      if loss is not None]
+            achieved[key] = min(losses) if losses else entry['loss_pop']
+        retained = sum(values[key]['reach'] * max(0.0, values[key]['loss_pop'] - achieved[key])
+                       for key in values)
+        burden = sum(item['complexity']['cost'] for item in chosen)
+        out.append({
+            'curriculum': name, 'items': len(chosen), 'burden': burden,
+            'positions_in_scope': len({k for item in chosen for k in item['keys']}),
+            'recognition_coverage': (recognition(db, chosen, source) if chosen else 0.0),
+            'evaluated_positions': len(values),
+            'value_retained': retained,
+            'lost_population_sample': base['lost_population'],
+            'recovery_fraction': (retained / base['lost_population']
+                                  if base['lost_population'] else None),
+            'value_per_burden': (retained / burden) if burden else None,
+            'recognition_only_items': sum(1 for item in chosen
+                                          if item.get('kind') == 'recognition_only'),
+        })
+    return out
 
 
 def persist(db, run_id, items):
