@@ -353,7 +353,11 @@ class ThreadLocalAnalyser:
 
     Each worker thread gets its own engine subprocess (python-chess engines are
     not thread-safe), configured at the topology's thread count and lazily
-    started on first use.
+    started on first use. Every engine that is ever started is registered here,
+    because python-chess runs the UCI protocol in a non-daemon thread: an engine
+    that is not quit keeps the interpreter alive after the work is done, and an
+    engine owned by a worker thread cannot be reached through thread-local
+    storage once that thread has returned. `close()` therefore quits all of them.
     """
 
     def __init__(self, binary: str, threads_per_worker: int = 1, hash_mb: int = 64):
@@ -361,6 +365,8 @@ class ThreadLocalAnalyser:
         self.threads_per_worker = int(threads_per_worker)
         self.hash_mb = int(hash_mb)
         self._local = threading.local()
+        self._engines: list = []
+        self._lock = threading.Lock()
 
     def _engine(self):
         engine = getattr(self._local, 'engine', None)
@@ -368,6 +374,8 @@ class ThreadLocalAnalyser:
             raw = chess.engine.SimpleEngine.popen_uci(self.binary)
             engine = _EngineProxy(raw, self.threads_per_worker, self.hash_mb)
             self._local.engine = engine
+            with self._lock:
+                self._engines.append(engine)
         return engine
 
     def __call__(self, fen: str, nodes: int, multipv: int = MULTIPV) -> dict:
@@ -376,10 +384,11 @@ class ThreadLocalAnalyser:
                                          engine=self._engine())
 
     def close(self) -> None:
-        engine = getattr(self._local, 'engine', None)
-        if engine is not None:
+        with self._lock:
+            engines, self._engines = self._engines, []
+        for engine in engines:
             engine.quit()
-            self._local.engine = None
+        self._local.engine = None
 
 
 def make_analyser(binary: str, threads_per_worker: int = 1, hash_mb: int = 64) -> Analyse:
@@ -675,7 +684,10 @@ def main(argv: Optional[list[str]] = None) -> None:
             parser.error('plan needs --engine-version (or --binary): it is part of the job key')
         db = studydb.connect(args.db, create=False)
         if not args.write:
-            ensure_schema(db)
+            # A dry run must not write anything, not even the ledger: check for the
+            # table instead of creating it, and treat "no ledger" as "nothing covered".
+            has_ledger = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                                    "AND name='engine_job'").fetchone() is not None
             rows = db.execute('''SELECT fen, tier FROM evaluation_candidate
                                  WHERE selected=1 AND campaign=?''', (args.campaign,)).fetchall()
             would = skipped = 0
@@ -683,12 +695,15 @@ def main(argv: Optional[list[str]] = None) -> None:
                 nodes = NODE_TIERS.get(tier)
                 if nodes is None:
                     continue
-                exists = db.execute('SELECT 1 FROM engine_job WHERE job_id=?',
-                                    (job_id_for(fen, MULTIPV, nodes, engine_version),)).fetchone()
+                exists = None
+                if has_ledger:
+                    exists = db.execute('SELECT 1 FROM engine_job WHERE job_id=?',
+                                        (job_id_for(fen, MULTIPV, nodes, engine_version),)).fetchone()
                 would += 1 if exists is None else 0
                 skipped += 1 if exists is not None else 0
             report = {'dry_run': True, 'would_insert': would, 'already_covered': skipped,
                       'candidates': len(rows), 'engine_version': engine_version,
+                      'ledger_present': has_ledger,
                       'nodes_per_tier': NODE_TIERS, 'multipv': MULTIPV}
         else:
             report = plan_jobs(db, args.campaign, engine_version)
