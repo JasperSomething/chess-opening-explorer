@@ -37,19 +37,24 @@ def render(course, out=ROOT / 'analysis'):
                  f"players played is an exception rather than a rule.\n")
 
     lines.append('## Curriculum by learning budget\n')
-    lines.append('| budget | items | orientation | schemas | decisions | exceptions available | '
-                 'flow coverage | strong-play behaviour explained | EV recovered | exact '
-                 'positions memorised | residual unexplained value |')
-    lines.append('|' + '---|' * 11)
+    lines.append('`burden` is the marginal currency: a component already introduced by an '
+                 'earlier item is not charged again. `actionable` is the share of selected '
+                 'schemas that contain at least one transformation the learner can perform.\n')
+    lines.append('| budget | items | burden | orientation | schemas | decisions | '
+                 'deviations kept | actionable | flow coverage | behaviour explained | '
+                 'EV recovered | memorised | residual |')
+    lines.append('|' + '---|' * 13)
     for budget, entry in course['courses'].items():
         report = entry['report']
+        exceptions_kept = len([item for item in entry.get('exceptions') or []
+                               if item.get('kind') != 'note'])
         lines.append(
-            f"| {budget} | {report['items']} | {report['orientation']} | "
-            f"{report['schemas']} | {report['decisions']} | {report['exceptions_available']} | "
+            f"| {budget} | {report['items']} | {report['burden']:.0f} | "
+            f"{report['orientation']} | {report['schemas']} | {report['decisions']} | "
+            f"{exceptions_kept} | {report['actionable_schema_fraction']:.2f} | "
             f"{report['flow_coverage']:.3f} | {report['behaviour_explained']:.3f} | "
-            f"{report['value_recovered']:.5f} ({report['recovery']:.3f} of the "
-            f"ordinary-play loss) | {report['positions_memorised']} | "
-            f"{report['residual_value']:.5f} |")
+            f"{report['value_recovered']:.5f} ({report['recovery']:.3f}) | "
+            f"{report['positions_memorised']} | {report['residual_value']:.5f} |")
     lines.append('')
 
     for budget, entry in course['courses'].items():
@@ -66,15 +71,26 @@ def render(course, out=ROOT / 'analysis'):
                          f"reach {item['reach']:.4f}, ply mean "
                          f"{_round(item['recognition'].get('ply_mean'))}, development "
                          f"{_round(item['recognition'].get('development_level'))}.\n")
+            distinctive = item.get('distinctive') or []
+            if distinctive:
+                lines.append('What separates this structure from the alternatives '
+                             '(in this family vs in the others):\n')
+                for row in distinctive[:6]:
+                    lines.append(f"    {row['fact']} — {row['present_in_family']:.2f} here "
+                                 f"vs {row['present_elsewhere']:.2f} elsewhere "
+                                 f"(lift {row['lift']:.2f})")
+                lines.append('')
+            if item.get('suppressed_facts'):
+                lines.append(f"Suppressed as non-distinguishing: "
+                             f"{', '.join(item['suppressed_facts'][:6])}.")
+                lines.append('')
             occupancy = item['recognition']['look_for'].get('recurring_occupancy') or []
             if occupancy:
-                lines.append('Where each piece already stands in this structure '
-                             '(share of that piece\'s reach-weighted squares):\n')
-                for entry_row in occupancy[:8]:
-                    squares = ', '.join(f"{row['square']} {row['share']:.2f}"
-                                        for row in entry_row['squares'][:3])
-                    lines.append(f"    {entry_row['piece']}: {squares}")
-                lines.append('')
+                lines.append('Raw occupancy (provenance, not the headline): '
+                             + '; '.join(f"{entry_row['piece']} "
+                                         f"{entry_row['squares'][0]['square']} "
+                                         f"{entry_row['squares'][0]['share']:.2f}"
+                                         for entry_row in occupancy[:5]) + '\n')
             structure_row = item['recognition']['look_for'].get('pawn_structure')
             if structure_row:
                 lines.append(f"This structure is defined by its pawn placement: white "
@@ -105,6 +121,19 @@ def render(course, out=ROOT / 'analysis'):
                 lines.append('\nSeen in some covered plans, not part of the schema:\n')
                 for row in item['transformations']['residual']:
                     lines.append(f"    - {row['text']}")
+            if item['transformations'].get('expected_consequence'):
+                lines.append('\nExpected consequence (not a lesson, cannot be performed):\n')
+                for row in item['transformations']['expected_consequence']:
+                    lines.append(f"    - {row['text']}")
+            diagnostic = item.get('coherence') or {}
+            if diagnostic:
+                lines.append(f"\nCoherence (reported separately, not scored): required "
+                             f"{diagnostic['required_count']}, optional "
+                             f"{diagnostic['optional_count']}, residual "
+                             f"{diagnostic['residual_count']}; distinct orderings "
+                             f"{diagnostic['distinct_orderings']}; ordering entropy "
+                             f"{diagnostic['ordering_entropy_bits']:.2f} bits; conditional "
+                             f"branches {diagnostic['conditional_branches']}.")
             ordering = item['ordering']
             lines.append(f"\nOrdering: flexibility {_round(ordering['flexibility'])} "
                          f"({'constrained' if ordering['constrained'] else 'largely free'})")
@@ -115,7 +144,10 @@ def render(course, out=ROOT / 'analysis'):
                 summary = ', '.join(f"{state} {value['share']:.2f}"
                                     for state, value in sorted(states.items()))
                 lines.append(f"\nCompletion state across its boards: {summary}")
-            lines.append(f"\nBurden {item['burden']:.0f}; marginal value "
+            if item.get('retained_because'):
+                lines.append(f"\nRetention: {item['retained_because']}")
+            lines.append(f"\nBurden {item['burden']:.0f} charged independently, "
+                         f"{_round(item.get('marginal_burden'), 2)} marginal; marginal value "
                          f"{_round(item.get('marginal_value'), 6)}; covers "
                          f"{item['positions']} positions; flow mass "
                          f"{item['flow_mass']:.4f}.\n")
@@ -138,22 +170,31 @@ def render(course, out=ROOT / 'analysis'):
                              f"{why['share_of_residual']:.2f} | {item['burden']:.0f} |")
             lines.append('')
 
-        exceptions = entry.get('exceptions') or []
+        notes = [item for item in entry.get('exceptions') or []
+                 if item.get('kind') == 'note']
+        if notes:
+            lines.append('### Resolved conflicts (shown as notes, not instructions)\n')
+            for item in notes:
+                lines.append(f"* {item['title']} — condition: "
+                             f"{item['condition']['explicit']}\n")
+        exceptions = [item for item in entry.get('exceptions') or []
+                      if item.get('kind') != 'note']
         if exceptions:
             lines.append('### Deviations, attached to what they modify\n')
             lines.append('A deviation is stored under the schema or decision it modifies and '
                          'is never shown as a branch of its own: it is what strong players '
                          'did instead at a board where the rule covers less than half of '
                          'their play.\n')
-            lines.append('| modifies | board | strong move instead | strong share | schema coverage |')
-            lines.append('|---|---|---|---|---|')
+            lines.append('| modifies | instead | boards | strong share | schema coverage | differs from |')
+            lines.append('|---|---|---|---|---|---|')
             for item in exceptions[:12]:
                 why = item['why_selected']
                 lines.append(f"| `{item['modifies'].split(':')[0]}:"
                              f"{item['modifies'].split(':')[-1][:8]}` | "
-                             f"`{item['board']['position_key'][:8]}` | "
-                             f"{why['observed_move']} | {why['observed_share']:.2f} | "
-                             f"{why['schema_share_of_strong_play']:.2f} |")
+                             f"{why['observed_move']} | "
+                             f"{item.get('occurrences', 1)} | {why['observed_share']:.2f} | "
+                             f"{why['schema_share_of_strong_play']:.2f} | "
+                             f"{' '.join(why.get('differs_from_prescription') or [])} |")
             if len(exceptions) > 12:
                 lines.append(f"\n({len(exceptions) - 12} further deviations are attached in "
                              f"the generated course file.)")

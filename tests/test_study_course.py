@@ -44,11 +44,79 @@ class GeneratedCourseTests(unittest.TestCase):
         if self.course is None:
             self.skipTest('course.json not generated')
 
-    def test_every_budget_respects_its_burden_limit(self):
+    def test_every_budget_respects_its_marginal_burden_limit(self):
         for budget, entry in self.course['courses'].items():
-            self.assertLessEqual(entry['report']['burden'], int(budget) + 1e-9)
-            self.assertLessEqual(sum(item['burden'] for item in entry['items']),
-                                 int(budget) + 1e-9)
+            report = entry['report']
+            self.assertLessEqual(report['burden'], int(budget) + 1e-9)
+            # the budget is spent in marginal units: a component already introduced by an
+            # earlier item is not charged twice, so the marginal total cannot exceed the
+            # sum of the items charged independently
+            independent = sum(item['burden'] for item in entry['items'])
+            self.assertGreaterEqual(independent + 1e-9, report['burden'])
+
+    def test_every_selected_schema_is_actionable(self):
+        for entry in self.course['courses'].values():
+            for item in entry['items']:
+                if item['kind'] != 'schema':
+                    continue
+                self.assertTrue(item['prescriptive'])
+                actions = [row for row in item['transformations']['required']
+                           if row['component'][0] in ('goal', 'transform', 'castle',
+                                                      'exchange')]
+                self.assertTrue(actions, 'a prescriptive schema needs a learner action')
+
+    def test_effects_are_never_the_taught_transformation(self):
+        for entry in self.course['courses'].values():
+            for item in entry['items']:
+                if item['kind'] != 'schema':
+                    continue
+                for row in item['transformations']['required']:
+                    self.assertNotIn(row['component'][0], ('transition', 'file_open'))
+                # effects may still be shown, but only as expected consequences
+                self.assertIn('expected_consequence', item['transformations'])
+
+    def test_orientation_leads_with_distinctive_facts_not_raw_occupancy(self):
+        for entry in self.course['courses'].values():
+            for item in entry['items']:
+                if item['kind'] != 'orientation':
+                    continue
+                self.assertTrue(item['distinctive'])
+                self.assertGreater(item['distinctive_information_score'], 0)
+                # raw occupancy survives, but only as provenance
+                self.assertIn('look_for', item['recognition'])
+                for row in item['distinctive']:
+                    # a fact true everywhere is not worth telling anyone
+                    self.assertFalse(row['present_in_family'] >= 0.95
+                                     and row['present_elsewhere'] >= 0.95)
+
+    def test_deviations_are_material_grouped_and_subordinate(self):
+        for entry in self.course['courses'].values():
+            selected = {item['item_id'] for item in entry['items']}
+            for item in entry.get('exceptions') or []:
+                self.assertIn(item['kind'], ('exception', 'note'))
+                self.assertTrue(item['modifies'].startswith(('schema:', 'decision:')))
+                if item['kind'] == 'exception':
+                    why = item['why_selected']
+                    # material: it changes the action, dominates what is played, is reached
+                    self.assertFalse(why['observed_move']
+                                     in (why.get('differs_from_prescription') or []))
+                    self.assertGreaterEqual(why['observed_share'], 0.30)
+                    self.assertGreaterEqual(item['board']['reach'], 1e-4)
+
+    def test_no_unresolved_contradiction_on_the_same_board(self):
+        for entry in self.course['courses'].values():
+            decisions = {item['board']['position_key']: set(item['prescribes']['moves'])
+                         for item in entry['items'] if item['kind'] == 'decision'}
+            for item in entry.get('exceptions') or []:
+                if item['kind'] != 'exception':
+                    continue
+                for board_entry in (item.get('boards') or [item['board']]):
+                    key = board_entry['position_key']
+                    if key not in decisions:
+                        continue
+                    self.assertFalse(
+                        set(item['prescribes']['moves']).isdisjoint(decisions[key]),
+                        'a deviation on the same board as a decision must be a note or agree')
 
     def test_recognition_items_never_carry_a_move(self):
         for entry in self.course['courses'].values():
@@ -132,7 +200,12 @@ class AuditTests(unittest.TestCase):
             'items': [schema('s1', ['N to c3']), schema('s2', ['N to c3', 'B to g2'])],
             'exceptions': []}}}
         findings = curriculum_audit.audit(course)
-        self.assertEqual(len(findings['redundant']), 1)
+        # an undeclared containment is a duplication the selector never recorded; a
+        # declared one is a deliberate retention with a stated reason
+        total = (len(findings.get('redundant_undeclared') or [])
+                 + len(findings.get('redundant_declared') or []))
+        self.assertEqual(total, 1)
+        self.assertEqual(len(findings.get('redundant_undeclared') or []), 1)
 
     def test_the_audit_repairs_nothing(self):
         source = (Path(__file__).resolve().parent.parent / 'study'

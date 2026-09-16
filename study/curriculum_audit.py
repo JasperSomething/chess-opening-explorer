@@ -40,7 +40,8 @@ def audit(course):
                     (budget, item['title'], f"{len(required)} transformations, none of them "
                                             f"an action the learner can complete"))
 
-        # 2. schemas whose required set is contained in another schema's required set
+        # 2. schemas whose required set is contained in another schema's required set.
+        # Both surviving is allowed, but the containment must be declared in the course.
         for a in schemas:
             for b in schemas:
                 if a is b:
@@ -48,8 +49,17 @@ def audit(course):
                 set_a = {tuple(row['component']) for row in a['transformations']['required']}
                 set_b = {tuple(row['component']) for row in b['transformations']['required']}
                 if set_a and set_a < set_b:
-                    findings['redundant'].append(
-                        (budget, a['title'], f"contained in '{b['title']}'"))
+                    # declared means: the selector recorded the containment and stated why
+                    # it was retained. One narrow schema can sit inside several broader
+                    # ones, so the declaration is a property of the item, not of the pair.
+                    declared = bool(a.get('contained_in')) and bool(a.get('retained_because'))
+                    key = 'redundant_declared' if declared else 'redundant_undeclared'
+                    findings[key].append(
+                        (budget, a['title'],
+                         f"contained in '{b['title']}'"
+                         + (f"; retained for its novel applicability: "
+                            f"{a.get('retained_because')}" if declared else
+                            "; the selector never recorded this containment")))
 
         # 3. duplicate titles: the learner sees the same thing twice
         titles = Counter(item['title'] for item in items)
@@ -68,16 +78,23 @@ def audit(course):
                 findings['unreachable'].append(
                     (budget, item['title'], f"reach {reach:.2e}"))
 
-        # 5. recognition items that carry no discriminating information
+        # 5. recognition items whose leading fact still fails to separate the family
+        # from the alternatives. The headline is the distinctive fact list; the raw
+        # occupancy block is provenance and is deliberately not what is judged.
         for item in orientation:
-            occupancy = item['recognition']['look_for'].get('recurring_occupancy') or []
-            if occupancy and occupancy[0]['squares'][0]['share'] > 0.95:
+            distinctive = item.get('distinctive') or []
+            if not distinctive:
+                findings['uninformative_recognition'].append(
+                    (budget, item['title'], 'no distinguishing fact survived scoring'))
+                continue
+            top = distinctive[0]
+            if top['lift'] < 1.2:
                 findings['uninformative_recognition'].append(
                     (budget, item['title'],
-                     f"the most distinctive fact is '{occupancy[0]['piece']} on "
-                     f"{occupancy[0]['squares'][0]['square']}' at "
-                     f"{occupancy[0]['squares'][0]['share']:.2f}, which is true of almost "
-                     f"every position"))
+                     f"its leading fact '{top['fact']}' appears at "
+                     f"{top['present_in_family']:.2f} here against "
+                     f"{top['present_elsewhere']:.2f} elsewhere (lift {top['lift']:.2f}): "
+                     f"almost no separation"))
 
         # 6. items a learner cannot parse at a glance
         for item in schemas:
@@ -122,7 +139,8 @@ def audit(course):
 
 LABELS = {
     'cannot_be_checked': 'Schemas that cannot be checked against a board',
-    'redundant': 'Schemas contained in another schema',
+    'redundant_undeclared': 'Schemas contained in another schema, never declared',
+    'redundant_declared': 'Schemas contained in another schema, declared and justified',
     'duplicate_titles': 'Items the learner sees twice under the same name',
     'unreachable': 'Items attached to positions nobody reaches',
     'uninformative_recognition': 'Recognition items that convey no distinction',
@@ -179,12 +197,19 @@ def _reading(findings, course):
             f"the interface cannot mark them complete, so the selected 'rule' is not a rule "
             f"— yet the selector ranked it highly, which is a flaw in the objective rather "
             f"than in the data.")
-    if findings.get('redundant'):
+    if findings.get('redundant_undeclared'):
         parts.append(
-            f"{len(findings['redundant'])} schemas are strict subsets of another selected "
-            f"schema, so a learner is shown a weaker version of something already presented; "
-            f"the shared-burden accounting does not prevent this because the subset still "
-            f"has a non-zero marginal value on the boards the larger schema misses.")
+            f"{len(findings['redundant_undeclared'])} schemas are strict subsets of another "
+            f"selected schema without the selector recording it: a learner would be shown "
+            f"a weaker version of something already presented, with no stated reason.")
+    if findings.get('redundant_declared'):
+        parts.append(
+            f"{len(findings['redundant_declared'])} containments are declared and justified: "
+            f"in each case the narrower schema reaches boards the broader one does not (or "
+            f"is materially better on shared boards), so it is retained on purpose rather "
+            f"than duplicated by accident. A human may still judge that learning both is not "
+            f"worth it, which is exactly the kind of judgement this audit is meant to expose "
+            f"rather than settle.")
     if findings.get('uninformative_recognition'):
         parts.append(
             f"{len(findings['uninformative_recognition'])} orientation items lead with a "
