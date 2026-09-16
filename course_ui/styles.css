@@ -18,6 +18,7 @@
   --board-light: #f0d9b5;
   --board-dark: #b58863;
   --hl-move: #baca44;
+  --board-frame: #76342a;
   --hl-green: #15781b;
   --radius: 10px;
   --board-size: min(62vh, 580px);
@@ -95,13 +96,19 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; letter-spacing: -.01em; }
 /* ------------------------------------------------------------------- board */
 .board-area { display: flex; flex-direction: column; align-items: center; gap: 16px; }
 .board {
-  /* lichess wood4, retoned so the squares average exactly #e1b875 (light) and #592904
-     (dark) while keeping the wood grain. The texture carries the 8x8 pattern
-     (1024x1024, one square per cell), so the squares beneath are transparent */
+  /* the Fritz board: a soft cream over a terracotta brown, measured from five ChessBase
+     screenshots (light #ddcab0, dark #b6714a, agreeing to within a few steps per
+     channel). Retoned from the wood4 grain to those colours with the grain eased to 0.7,
+     because the Fritz squares are near-flat wood rather than strongly grained. The
+     mahogany frame is the one measured around the same board, #76342a. */
   width: var(--board-size); height: var(--board-size); position: relative;
-  background-image: url('/ui/board-wood4-custom.jpg');
+  background-image: url('/ui/board-fritz.jpg');
   background-size: 100% 100%; background-repeat: no-repeat;
-  border-radius: 3px; overflow: hidden; box-shadow: var(--shadow); flex: none;
+  border-radius: 2px; overflow: hidden; flex: none;
+  /* the frame is drawn as a ring so it cannot push the layout, and cannot be clipped
+     the way a border would be by the fixed board size */
+  box-shadow: 0 0 0 1px rgba(0,0,0,.55), 0 0 0 18px var(--board-frame),
+              0 0 0 19px #461d13, var(--shadow);
 }
 .board .grid { display: grid; grid-template-columns: repeat(8, 1fr);
                grid-template-rows: repeat(8, 1fr); width: 100%; height: 100%; }
@@ -205,7 +212,8 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; letter-spacing: -.01em; }
               aspect-ratio: 1; border-radius: 4px; overflow: hidden; }
 .node .mini div { display: flex; align-items: center; justify-content: center;
                   font-size: 9px; line-height: 1; }
-.node .mini { background-image: url('/ui/board-wood4-custom.jpg'); background-size: 100% 100%; }
+.node .mini { background-image: url('/ui/board-fritz.jpg'); background-size: 100% 100%;
+              box-shadow: 0 0 0 4px var(--board-frame); border-radius: 2px; }
 .node .mini .light, .node .mini .dark { background: transparent; }
 .node .mini .w { color: #fbfdff; } .node .mini .b { color: #14171b; }
 .node .name { font-size: 13px; margin-top: 8px; color: var(--ink); }

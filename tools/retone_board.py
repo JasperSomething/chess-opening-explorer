@@ -46,19 +46,20 @@ def class_means(buf):
     return ([v / n_light for v in light], [v / n_dark for v in dark])
 
 
-def lookup(source_mean, target):
+def lookup(source_mean, target, grain):
     table = []
     for value in range(256):
-        mapped = target + (value - source_mean) * GRAIN
+        mapped = target + (value - source_mean) * grain
         table.append(max(0, min(255, int(round(mapped)))))
     return table
 
 
-def retone(buf, light_mean, dark_mean):
+def retone(buf, light_mean, dark_mean, light_target, dark_target, grain):
     tables = {}
-    for name, mean, target in (('light', light_mean, LIGHT_TARGET),
-                               ('dark', dark_mean, DARK_TARGET)):
-        tables[name] = [lookup(mean[channel], target[channel]) for channel in range(3)]
+    for name, mean, target in (('light', light_mean, light_target),
+                               ('dark', dark_mean, dark_target)):
+        tables[name] = [lookup(mean[channel], target[channel], grain)
+                        for channel in range(3)]
     for row in range(SIZE):
         row_is_light = (row // CELL) % 2 == 0
         for col in range(SIZE):
@@ -80,19 +81,28 @@ def encode(buf, path):
 def main():
     source = Path(sys.argv[1])
     destination = Path(sys.argv[2])
+    light_target = LIGHT_TARGET
+    dark_target = DARK_TARGET
+    grain = GRAIN
+    if len(sys.argv) > 3:
+        light_target = tuple(int(sys.argv[3].lstrip('#')[i:i + 2], 16) for i in (0, 2, 4))
+    if len(sys.argv) > 4:
+        dark_target = tuple(int(sys.argv[4].lstrip('#')[i:i + 2], 16) for i in (0, 2, 4))
+    if len(sys.argv) > 5:
+        grain = float(sys.argv[5])
     buf = decode(source)
     light_mean, dark_mean = class_means(buf)
     print(f'source {source.name}: light mean '
           f'({light_mean[0]:.0f},{light_mean[1]:.0f},{light_mean[2]:.0f}) dark mean '
           f'({dark_mean[0]:.0f},{dark_mean[1]:.0f},{dark_mean[2]:.0f})')
-    buf = retone(buf, light_mean, dark_mean)
+    buf = retone(buf, light_mean, dark_mean, light_target, dark_target, grain)
     encode(buf, destination)
     check = decode(destination)
     light_after, dark_after = class_means(check)
     print(f'output {destination.name}: light mean '
           f'({light_after[0]:.0f},{light_after[1]:.0f},{light_after[2]:.0f}) dark mean '
           f'({dark_after[0]:.0f},{dark_after[1]:.0f},{dark_after[2]:.0f})')
-    print(f'targets: light {LIGHT_TARGET} dark {DARK_TARGET}')
+    print(f'targets: light {light_target} dark {dark_target} grain {grain}')
 
 
 if __name__ == '__main__':
