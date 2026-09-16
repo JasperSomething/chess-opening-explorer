@@ -220,7 +220,7 @@ function drawBoard(opts) {
 function highlightStyles() {
   const style = document.createElement('style');
   style.textContent = `
-    .sq.hl-pawn { background-image: linear-gradient(rgba(186,202,68,.62), rgba(186,202,68,.62)); }
+    .sq.hl-pawn { background-image: linear-gradient(rgba(198,214,84,.80), rgba(198,214,84,.80)); }
     .sq.hl-piece { box-shadow: inset 0 0 0 4px rgba(46,158,55,.92); }
     .sq.hl-flexible { box-shadow: inset 0 0 0 2.5px rgba(54,146,231,.75); border-radius: 50%; }
     .sq.hl-distinct { box-shadow: inset 0 0 0 4px rgba(46,158,55,.95); }`;
