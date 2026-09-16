@@ -1,8 +1,12 @@
 """Read-only server for the generated Scandinavian course.
 
-Serves the generated course file and, on demand, the evidence behind any item
-(Masters, Lichess and engine), read straight from the analysis database. It writes
-nothing, and it never computes a new evaluation or fetches a new distribution.
+Serves the frontend, the generated course file, and — on demand — the evidence behind
+any item (Masters, Lichess and engine), the structural flow between the course's
+structures for the opening map, and alternate representative move orders for a family.
+
+It writes nothing, computes no new evaluation, fetches no new distribution and changes
+no part of the frozen curriculum: everything it returns is read from the analysis
+database or from the already-generated course file.
 """
 import argparse
 import json
@@ -31,23 +35,43 @@ class Handler(BaseHTTPRequestHandler):
         body = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
         self.send_response(status)
         self.send_header('Content-Type', content_type)
+        # the UI is edited while it is being reviewed, so stale caches are worse than a
+        # extra few kilobytes per load
+        self.send_header('Cache-Control', 'no-store, must-revalidate')
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
     def do_GET(self):
         parsed = urlparse(self.path)
-        if parsed.path in ('/', '/index.html'):
+        query = parse_qs(parsed.query)
+        if parsed.path in ('/', '/index.html', '/ui', '/ui/'):
             return self._send((UI / 'index.html').read_bytes(), 'text/html; charset=utf-8')
+        if parsed.path.startswith('/ui/'):
+            return self._static(parsed.path)
         if parsed.path == '/course.json':
             if not COURSE.exists():
                 return self._send({'error': 'course.json not generated yet'}, status=404)
             return self._send(COURSE.read_bytes())
         if parsed.path == '/evidence':
-            query = parse_qs(parsed.query)
             key = (query.get('position_key') or [''])[0]
             return self._send(evidence(key, self.db_path))
+        if parsed.path == '/flow':
+            return self._send(flow(self.db_path))
+        if parsed.path == '/orders':
+            family = (query.get('family') or [''])[0]
+            return self._send(orders(family, self.db_path))
         return self._send({'error': 'not found'}, status=404)
+
+    def _static(self, path):
+        name = Path(path).name
+        target = UI / name
+        if not target.exists() or target.is_dir():
+            return self._send({'error': 'not found'}, status=404)
+        kinds = {'.css': 'text/css; charset=utf-8', '.js': 'application/javascript; charset=utf-8',
+                 '.svg': 'image/svg+xml', '.woff2': 'font/woff2'}
+        return self._send(target.read_bytes(),
+                          kinds.get(target.suffix, 'application/octet-stream'))
 
 
 def evidence(position_key_hex, db_path=DEFAULT_DB):
@@ -80,6 +104,94 @@ def evidence(position_key_hex, db_path=DEFAULT_DB):
         out['engine'] = [dict(entry) for entry in evals]
     connection.close()
     return out
+
+
+def flow(db_path=DEFAULT_DB):
+    """Structural transitions among the course's structures, for the opening map.
+
+    Read from the existing flow graph with the existing research helper; nothing is
+    recomputed beyond aggregating edges the project already produces.
+    """
+    from study import structure_flow
+    db = sqlite3.connect(f'file:{db_path}?mode=ro', uri=True)
+    db.row_factory = sqlite3.Row
+    positions, moves = structure_flow.load_graph_inputs(db, 'local2200')
+    edges, summary = structure_flow.transition_edges(positions, moves)
+    structures = {}
+    for row in db.execute('SELECT structure_id, entry_mass, boards, ply_mean, development_level '
+                          'FROM structure_maturity WHERE source=?', ('local2200',)):
+        structures[row['structure_id']] = dict(row)
+    families = set(structures)
+    out_edges = []
+    # transition_edges returns {(source_structure, destination_structure, move): mass}
+    for (source, target, uci), mass in edges.items():
+        if source in families and target in families and mass >= 0.005:
+            out_edges.append({'from': source, 'to': target, 'mass': mass, 'move': uci})
+    board_of = {}
+    for row in db.execute('SELECT p.structure_id, p.position_key, p.fen, p.ply, '
+                          'f.reach_flow FROM position p JOIN position_flow f '
+                          'ON f.position_key = p.position_key WHERE f.source = ?',
+                          ('local2200',)):
+        reach = row['reach_flow'] or 0.0
+        current = board_of.get(row['structure_id'])
+        if current is None or reach > current['reach']:
+            board_of[row['structure_id']] = {'fen': row['fen'], 'ply': row['ply'],
+                                            'reach': reach}
+    db.close()
+    return {'structures': [{'id': key, **{k: v for k, v in value.items()},
+                            'board': board_of.get(key)} for key, value in structures.items()],
+            'edges': out_edges}
+
+
+def orders(family, db_path=DEFAULT_DB, plies=10):
+    """Representative move orders for a structure: the main line, then alternatives.
+
+    Each order follows the highest-mass edge at every step; the alternatives differ at
+    the first ply where another move carries real mass and then continue the same way,
+    so a learner can see the same plan arising through different sequences. Read-only.
+    """
+    if not family:
+        return {'error': 'family required'}
+    from study import structure_flow
+    db = sqlite3.connect(f'file:{db_path}?mode=ro', uri=True)
+    db.row_factory = sqlite3.Row
+    positions, moves = structure_flow.load_graph_inputs(db, 'local2200')
+    start = None
+    for row in db.execute('SELECT position_key FROM position WHERE structure_id=?',
+                          (family,)):
+        if row['position_key'] in moves and moves[row['position_key']]:
+            start = row['position_key']
+            break
+    if start is None:
+        db.close()
+        return {'orders': []}
+    fens = {row['position_key']: row['fen'] for row in
+            db.execute('SELECT position_key, fen FROM position')}
+    db.close()
+
+    def walk(first_choice):
+        line, key = [], start
+        for ply in range(plies):
+            outgoing = sorted(moves.get(key) or [], key=lambda edge: -edge[2])
+            if not outgoing:
+                break
+            pick = min(first_choice, len(outgoing) - 1)
+            child, uci, games = outgoing[pick]
+            line.append({'fen': fens.get(key, ''), 'uci': uci, 'games': games,
+                         'ply': ply + 1})
+            first_choice = 0
+            key = child
+        return line
+
+    first = walk(0)
+    alternatives = []
+    for index in (1, 2):
+        line = walk(index)
+        if line and line not in alternatives and line != first:
+            alternatives.append(line)
+    return {'family': family, 'orders': [{'label': 'main line', 'moves': first}] +
+            [{'label': f'alternative {i + 1}', 'moves': line}
+             for i, line in enumerate(alternatives)]}
 
 
 def main():
