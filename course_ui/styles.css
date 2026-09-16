@@ -1,19 +1,24 @@
 :root {
-  --bg: #0d0f12;
-  --surface: #14171c;
-  --surface-2: #1a1e24;
-  --surface-3: #20252d;
-  --border: #272c35;
-  --border-strong: #333a45;
-  --ink: #e9edf2;
-  --ink-dim: #9ba4b0;
-  --ink-faint: #6b7480;
-  --accent: #8fbf7f;
-  --accent-dim: #5d8757;
-  --gold: #d9b25f;
-  --danger: #d98066;
-  --board-light: #cbd2d9;
-  --board-dark: #6d7885;
+  /* Lichess palette: dark chrome from lichess.org dark mode, board from its default
+     brown theme (light #f0d9b5 / dark #b58863), highlight and arrow greens likewise */
+  --bg: #161512;
+  --surface: #211f1d;
+  --surface-2: #2a2725;
+  --surface-3: #34302d;
+  --border: #3d3a37;
+  --border-strong: #4f4a45;
+  --ink: #e9e5df;
+  --ink-dim: #a9a49c;
+  --ink-faint: #7f7a73;
+  --accent: #629924;
+  --accent-dim: #4b7a1c;
+  --blue: #3692e7;
+  --gold: #d29b3f;
+  --danger: #c96a52;
+  --board-light: #f0d9b5;
+  --board-dark: #b58863;
+  --hl-move: #baca44;
+  --hl-green: #15781b;
   --radius: 10px;
   --board-size: min(62vh, 580px);
   --shadow: 0 10px 30px rgba(0, 0, 0, .35);
@@ -90,25 +95,34 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; letter-spacing: -.01em; }
 /* ------------------------------------------------------------------- board */
 .board-area { display: flex; flex-direction: column; align-items: center; gap: 16px; }
 .board {
-  /* the glyph is sized from the square, never from the viewport: sizing it in vmin
-     overflowed the squares and cropped the board */
+  /* lichess wood4, contrast raised 1.45x: measured square contrast 2.74 -> 4.17, which
+     is the fritz-like range without changing the board's grain or hue. The texture
+     carries the 8x8 pattern (1024x1024, one square per cell), so squares are transparent */
   width: var(--board-size); height: var(--board-size); position: relative;
-  border-radius: 6px; overflow: hidden; box-shadow: var(--shadow); flex: none;
+  background-image: url('/ui/board-wood4-contrast.jpg');
+  background-size: 100% 100%; background-repeat: no-repeat;
+  border-radius: 3px; overflow: hidden; box-shadow: var(--shadow); flex: none;
 }
 .board .grid { display: grid; grid-template-columns: repeat(8, 1fr);
                grid-template-rows: repeat(8, 1fr); width: 100%; height: 100%; }
 .sq { position: relative; display: flex; align-items: center; justify-content: center;
       user-select: none; }
-.sq.light { background: var(--board-light); }
-.sq.dark { background: var(--board-dark); }
+.sq.light, .sq.dark { background: transparent; }   /* the wood4 texture shows through */
 .sq .glyph { font-size: calc(var(--board-size) / 8 * 0.76); line-height: 1; }
+.sq img.piece { width: 100%; height: 100%; display: block; user-select: none;
+                -webkit-user-drag: none;
+                filter: drop-shadow(0 1px 1px rgba(40, 25, 10, .28)); }
+.node .mini img.piece { width: 100%; height: 100%; display: block; }
 .sq.w { color: #fbfdff; text-shadow: 0 1px 2px rgba(0,0,0,.45), 0 0 1px #2a2f36; }
 .sq.b { color: #14171b; text-shadow: 0 1px 1px rgba(255,255,255,.22); }
-.sq .coord { position: absolute; bottom: 2px; right: 4px; font-size: 10px;
-             color: rgba(20,23,27,.42); }
-.sq.sel { box-shadow: inset 0 0 0 3px var(--gold); }
-.sq.target::after { content: ''; position: absolute; inset: 34%;
-                    border-radius: 50%; background: rgba(20,23,27,.28); }
+.sq .coord { position: absolute; bottom: 1px; right: 3px; font-size: 10px;
+             font-weight: 600; }
+.sq.light .coord { color: rgba(94, 60, 26, .72); }
+.sq.dark .coord { color: rgba(247, 235, 214, .78); }
+.sq.sel { box-shadow: inset 0 0 0 3px var(--blue); }
+.sq.last { box-shadow: inset 0 0 0 300px rgba(186, 202, 68, .42); }
+.sq.target::after { content: ''; position: absolute; inset: 33%;
+                    border-radius: 50%; background: rgba(30, 22, 14, .30); }
 .board svg.overlay { position: absolute; inset: 0; pointer-events: none; }
 .board .badge { position: absolute; left: 10px; top: 10px; background: rgba(13,15,18,.82);
                 color: var(--ink); font-size: 11.5px; padding: 4px 9px; border-radius: 5px;
@@ -117,10 +131,10 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; letter-spacing: -.01em; }
           font-size: 12px; color: var(--ink-dim); }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
-.legend i.pawn { background: rgba(217,178,95,.55); }
-.legend i.piece { box-shadow: inset 0 0 0 2px var(--accent); }
-.legend i.flex { box-shadow: inset 0 0 0 2px var(--ink-faint); border-radius: 50%; }
-.legend i.arrow { width: 22px; height: 0; border-top: 3px solid var(--accent); border-radius: 2px; }
+.legend i.pawn { background: rgba(186, 202, 68, .75); }
+.legend i.piece { box-shadow: inset 0 0 0 3px #2e9e37; }
+.legend i.flex { box-shadow: inset 0 0 0 2px var(--blue); border-radius: 50%; }
+.legend i.arrow { width: 22px; height: 0; border-top: 3px solid var(--hl-green); border-radius: 2px; }
 
 .board-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
                   justify-content: center; }
@@ -191,8 +205,8 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; letter-spacing: -.01em; }
               aspect-ratio: 1; border-radius: 4px; overflow: hidden; }
 .node .mini div { display: flex; align-items: center; justify-content: center;
                   font-size: 9px; line-height: 1; }
-.node .mini .light { background: var(--board-light); }
-.node .mini .dark { background: var(--board-dark); }
+.node .mini { background-image: url('/ui/board-wood4-contrast.jpg'); background-size: 100% 100%; }
+.node .mini .light, .node .mini .dark { background: transparent; }
 .node .mini .w { color: #fbfdff; } .node .mini .b { color: #14171b; }
 .node .name { font-size: 13px; margin-top: 8px; color: var(--ink); }
 .node .meta { font-size: 11.5px; color: var(--ink-faint); }

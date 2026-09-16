@@ -27,6 +27,10 @@ DEFAULT_DB = ROOT / 'data' / 'atlas-analysis.sqlite'
 
 class Handler(BaseHTTPRequestHandler):
     db_path = DEFAULT_DB
+    # the page pulls ~32 piece images plus two large JSON payloads at once; the default
+    # backlog of 5 dropped connections under that burst, which silently tripped the
+    # piece-image fallback path
+    protocol_version = 'HTTP/1.1'
 
     def log_message(self, *args):        # keep the console readable
         pass
@@ -69,7 +73,8 @@ class Handler(BaseHTTPRequestHandler):
         if not target.exists() or target.is_dir():
             return self._send({'error': 'not found'}, status=404)
         kinds = {'.css': 'text/css; charset=utf-8', '.js': 'application/javascript; charset=utf-8',
-                 '.svg': 'image/svg+xml', '.woff2': 'font/woff2'}
+                 '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.jpg': 'image/jpeg',
+                 '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp'}
         return self._send(target.read_bytes(),
                           kinds.get(target.suffix, 'application/octet-stream'))
 
@@ -200,6 +205,8 @@ def main():
     parser.add_argument('--db', type=Path, default=DEFAULT_DB)
     options = parser.parse_args()
     Handler.db_path = options.db
+    ThreadingHTTPServer.request_queue_size = 128
+    ThreadingHTTPServer.daemon_threads = True
     server = ThreadingHTTPServer(('127.0.0.1', options.port), Handler)
     print(f'course UI on http://127.0.0.1:{options.port}/  (read-only; course file '
           f'{"present" if COURSE.exists() else "MISSING"})', flush=True)

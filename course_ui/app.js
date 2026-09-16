@@ -64,6 +64,32 @@ function richestPlan() {
 }
 function sortedBySeverity(list) { return list.slice().sort((a,b)=> (b.occurrences||1)-(a.occurrences||1)); }
 
+function pieceCode(fenChar) {
+  /* FEN uses case for colour and a single letter for the piece ('r'); the asset files
+     are named for both ('bR'). Mixing them up silently 404s every piece. */
+  const upper = fenChar.toUpperCase();
+  return (fenChar === upper ? 'w' : 'b') + upper;
+}
+function glyphFor(code) {
+  return code[0] === 'w' ? code[1] : code[1].toLowerCase();
+}
+function pieceImage(code) {
+  /* lichess's alpha piece set, served from /ui; code is 'wK' / 'bQ' style */
+  const img = el('img', 'piece');
+  img.src = `/ui/piece-alpha-${code}.svg`;
+  img.alt = code;
+  img.draggable = false;
+  let retried = false;
+  img.onerror = () => {
+    if (!retried) {                    // a burst can drop a request; try once more
+      retried = true;
+      setTimeout(() => { img.src = `/ui/piece-alpha-${code}.svg?r=1`; }, 250);
+      return;
+    }
+    img.replaceWith(el('span', 'glyph ' + code[0], PIECE_GLYPH[glyphFor(code)]));
+  };
+  return img;
+}
 function parseFen(fen) {
   const out = {};
   const rows = (fen || '').split(' ')[0].split('/');
@@ -141,11 +167,7 @@ function drawBoard(opts) {
   for (let r = 0; r < 8; r++) for (let f = 0; f < 8; f++) {
     const name = FILES[f] + (8 - r);
     const sq = el('div', 'sq ' + (((r + f) % 2) ? 'dark' : 'light'));
-    if (pieces[name]) {
-      const light = pieces[name] === pieces[name].toUpperCase();
-      const g = el('span', 'glyph ' + (light ? 'w' : 'b'), PIECE_GLYPH[pieces[name]]);
-      sq.appendChild(g);
-    }
+    if (pieces[name]) sq.appendChild(pieceImage(pieceCode(pieces[name])));
     if (highlights[name]) sq.classList.add('hl-' + highlights[name]);
     if (state.board.selected === name) sq.classList.add('sel');
     if (opts.targets && opts.targets.includes(name)) sq.classList.add('target');
@@ -166,29 +188,29 @@ function drawBoard(opts) {
         const c = document.createElementNS(svg.namespaceURI,'circle');
         c.setAttribute('cx',x); c.setAttribute('cy',y); c.setAttribute('r',9.5);
         c.setAttribute('fill','none');
-        c.setAttribute('stroke', arrow.style === 'optional' ? '#d9b25f' : '#8fbf7f');
-        c.setAttribute('stroke-width', 1.4); c.setAttribute('stroke-dasharray','3 2');
+        c.setAttribute('stroke', arrow.style === 'optional' ? '#d29b3f' : '#15781b');
+        c.setAttribute('stroke-width', 1.6); c.setAttribute('stroke-dasharray','3 2');
         svg.appendChild(c);
       }
       continue;
     }
     const [x1,y1] = centre(arrow.from), [x2,y2] = centre(arrow.to);
-    const colour = arrow.done ? '#d9b25f' : (arrow.style === 'optional' ? '#d9b25f' : '#8fbf7f');
+    const colour = arrow.done ? '#7f7a73' : (arrow.style === 'optional' ? '#d29b3f' : '#15781b');
     const line = document.createElementNS(svg.namespaceURI,'line');
     line.setAttribute('x1',x1); line.setAttribute('y1',y1);
     line.setAttribute('x2',x2); line.setAttribute('y2',y2);
     line.setAttribute('stroke', colour);
-    line.setAttribute('stroke-width', arrow.done ? 1.3 : 2.2);
+    line.setAttribute('stroke-width', arrow.done ? 1.5 : 2.6);
     line.setAttribute('stroke-linecap','round');
-    line.setAttribute('opacity', arrow.done ? 0.45 : 0.95);
+    line.setAttribute('opacity', arrow.done ? 0.5 : 1);
     if (arrow.done) line.setAttribute('stroke-dasharray','4 3');
     line.setAttribute('marker-end', arrow.done ? 'url(#head-done)' : 'url(#head)');
     svg.appendChild(line);
   }
   const defs = document.createElementNS(svg.namespaceURI,'defs');
   defs.innerHTML =
-    '<marker id="head" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8fbf7f"/></marker>' +
-    '<marker id="head-done" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="3.4" markerHeight="3.4" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#d9b25f"/></marker>';
+    '<marker id="head" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#15781b"/></marker>' +
+    '<marker id="head-done" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="3.4" markerHeight="3.4" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#7f7a73"/></marker>';
   svg.appendChild(defs);
   wrap.appendChild(svg);
   if (opts.badge) wrap.appendChild(el('div','badge',opts.badge));
@@ -198,10 +220,10 @@ function drawBoard(opts) {
 function highlightStyles() {
   const style = document.createElement('style');
   style.textContent = `
-    .sq.hl-pawn { background-image: linear-gradient(rgba(217,178,95,.42), rgba(217,178,95,.42)); }
-    .sq.hl-piece { box-shadow: inset 0 0 0 2.5px rgba(143,191,127,.9); }
-    .sq.hl-flexible { box-shadow: inset 0 0 0 2px rgba(155,164,176,.55); border-radius: 50%; }
-    .sq.hl-distinct { box-shadow: inset 0 0 0 3px rgba(143,191,127,.95); }`;
+    .sq.hl-pawn { background-image: linear-gradient(rgba(186,202,68,.62), rgba(186,202,68,.62)); }
+    .sq.hl-piece { box-shadow: inset 0 0 0 4px rgba(46,158,55,.92); }
+    .sq.hl-flexible { box-shadow: inset 0 0 0 2.5px rgba(54,146,231,.75); border-radius: 50%; }
+    .sq.hl-distinct { box-shadow: inset 0 0 0 4px rgba(46,158,55,.95); }`;
   return style;
 }
 
@@ -460,8 +482,7 @@ function miniBoard(fen) {
   for (let r = 0; r < 8; r++) for (let f = 0; f < 8; f++) {
     const name = FILES[f] + (8 - r);
     const cell = el('div', ((r + f) % 2) ? 'dark' : 'light');
-    if (pieces[name]) cell.classList.add(pieces[name] === pieces[name].toUpperCase() ? 'w' : 'b'),
-      cell.textContent = PIECE_GLYPH[pieces[name]];
+    if (pieces[name]) cell.appendChild(pieceImage(pieceCode(pieces[name])));
     wrap.appendChild(cell);
   }
   return wrap;
