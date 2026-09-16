@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Scandinavian course — generated curriculum</title>
+<style>
+  :root { --ink:#1a1a1a; --muted:#6b6b6b; --line:#d8d8d8; --accent:#2c6e49;
+          --warn:#a33; --board-light:#e8e0d0; --board-dark:#b58863; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+         color:var(--ink); background:#fafafa; }
+  header { padding:10px 16px; border-bottom:1px solid var(--line); background:#fff;
+           display:flex; align-items:baseline; gap:16px; flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0; font-weight:600; }
+  header .sub { color:var(--muted); font-size:12px; }
+  .budgets button { font:inherit; margin-left:6px; padding:3px 10px; border:1px solid var(--line);
+                    background:#fff; border-radius:4px; cursor:pointer; }
+  .budgets button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+  main { display:grid; grid-template-columns: 320px minmax(420px,1fr) 420px; gap:16px;
+         padding:16px; align-items:start; }
+  @media (max-width:1200px) { main { grid-template-columns: 1fr; } }
+  .panel { background:#fff; border:1px solid var(--line); border-radius:6px; padding:12px; }
+  .panel h2 { font-size:13px; text-transform:uppercase; letter-spacing:.04em;
+              color:var(--muted); margin:0 0 8px; }
+  .item { padding:6px 8px; border-radius:4px; cursor:pointer; border:1px solid transparent; }
+  .item:hover { background:#f2f2f2; }
+  .item.selected { background:#eef4ef; border-color:var(--accent); }
+  .item .kind { font-size:11px; text-transform:uppercase; letter-spacing:.03em;
+                color:var(--muted); display:block; }
+  .group { margin-bottom:12px; }
+  .group > .label { font-size:11px; text-transform:uppercase; color:var(--muted);
+                    letter-spacing:.04em; margin:6px 0 4px; }
+  .board-wrap { display:flex; gap:16px; flex-wrap:wrap; }
+  .board { width:384px; height:384px; display:grid; grid-template-columns:repeat(8,1fr);
+           border:1px solid var(--line); position:relative; }
+  .sq { position:relative; display:flex; align-items:center; justify-content:center;
+        font-size:30px; user-select:none; }
+  .sq.light { background:var(--board-light); } .sq.dark { background:var(--board-dark); }
+  .sq .coord { position:absolute; bottom:1px; right:3px; font-size:9px; color:#5a4632; }
+  .overlay { position:absolute; inset:0; pointer-events:none; }
+  .pill { display:inline-block; padding:1px 7px; border-radius:10px; font-size:11px;
+          border:1px solid var(--line); background:#f6f6f6; margin-right:4px; }
+  .pill.required { background:#eef4ef; border-color:var(--accent); color:#1c4a30; }
+  .pill.optional { background:#fdf6e3; border-color:#d9b96a; }
+  .pill.residual { background:#f6f6f6; color:var(--muted); }
+  .pill.complete { background:#e6f0ea; }
+  .pill.actionable { background:#e9eefb; }
+  .pill.unknown { background:#fdecec; border-color:#d99; }
+  table { border-collapse:collapse; width:100%; font-size:12px; }
+  th, td { text-align:left; padding:3px 6px; border-bottom:1px solid #eee; }
+  th { color:var(--muted); font-weight:500; }
+  .recognition { color:var(--accent); font-weight:600; }
+  .prescription { color:var(--warn); font-weight:600; }
+  details { margin-top:8px; } summary { cursor:pointer; color:var(--muted); font-size:12px; }
+  .muted { color:var(--muted); }
+  .stepper { display:flex; gap:6px; align-items:center; margin-top:8px; }
+  .stepper button { font:inherit; padding:2px 8px; border:1px solid var(--line);
+                    background:#fff; border-radius:4px; cursor:pointer; }
+  code { background:#f4f4f4; padding:1px 4px; border-radius:3px; font-size:12px; }
+  .why { background:#fbfbf6; border-left:3px solid #d9b96a; padding:6px 10px; margin:8px 0;
+         font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Scandinavian course <span class="sub">machine-generated; nothing here is hand-written</span></h1>
+  <div class="budgets" id="budgets"></div>
+  <div class="sub" id="budget-summary"></div>
+</header>
+<main>
+  <section class="panel">
+    <h2>What to understand</h2>
+    <div id="tree"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Board</h2>
+    <div class="board-wrap">
+      <div id="board" class="board"></div>
+      <div style="flex:1; min-width:180px">
+        <div id="board-caption" class="muted"></div>
+        <div class="stepper">
+          <button id="prev">‹</button><span id="ply"></span><button id="next">›</button>
+        </div>
+        <label class="muted" style="display:block;margin-top:8px">
+          <input type="checkbox" id="show-dest" checked> show recurring destinations
+        </label>
+        <label class="muted" style="display:block">
+          <input type="checkbox" id="show-state"> show transformation states
+        </label>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel" id="detail"></section>
+</main>
+<script>
+const PIECES = {K:'♔',Q:'♕',R:'♖',B:'♗',N:'♘',P:'♙',k:'♚',q:'♛',r:'♜',b:'♝',n:'♞',p:'♟'};
+let course=null, budget='25', selected=null, line=[], ply=0, lineId=null;
+let familyDestinations={};     // family -> recurring destinations, so any board can show them
+
+function fenSquares(fen){
+  const rows=fen.split(' ')[0].split('/'); const out={};
+  rows.forEach((row,r)=>{ let f=0;
+    for (const ch of row){ if (/\d/.test(ch)) { f+=+ch; continue; }
+      out[String.fromCharCode(97+f)+(8-r)]=ch; f++; } });
+  return out;
+}
+function drawBoard(fen, opts={}){
+  const el=document.getElementById('board'); el.innerHTML='';
+  const pieces=fenSquares(fen);
+  for (let r=0;r<8;r++) for (let f=0;f<8;f++){
+    const name=String.fromCharCode(97+f)+(8-r);
+    const sq=document.createElement('div');
+    sq.className='sq '+(((r+f)%2)?'dark':'light'); sq.id='sq-'+name;
+    if (pieces[name]) sq.textContent=PIECES[pieces[name]];
+    const coord=document.createElement('span'); coord.className='coord'; coord.textContent=name;
+    sq.appendChild(coord); el.appendChild(sq);
+  }
+  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
+  svg.setAttribute('class','overlay'); svg.setAttribute('viewBox','0 0 384 384');
+  const center=s=>[ (s.charCodeAt(0)-97)*48+24, (8-+s[1])*48+24 ];
+  if (opts.destinations) for (const d of opts.destinations){
+    const [x1,y1]=center(d.from), [x2,y2]=center(d.to);
+    const line=document.createElementNS(svg.namespaceURI,'line');
+    line.setAttribute('x1',x1); line.setAttribute('y1',y1);
+    line.setAttribute('x2',x2); line.setAttribute('y2',y2);
+    line.setAttribute('stroke','#2c6e49'); line.setAttribute('stroke-opacity',0.25+0.6*d.share);
+    line.setAttribute('stroke-width',1+8*d.share); line.setAttribute('marker-end','url(#arrow)');
+    svg.appendChild(line);
+  }
+  if (opts.highlight) for (const sqName of opts.highlight){
+    const [x,y]=center(sqName);
+    const circle=document.createElementNS(svg.namespaceURI,'circle');
+    circle.setAttribute('cx',x); circle.setAttribute('cy',y); circle.setAttribute('r',18);
+    circle.setAttribute('fill','none'); circle.setAttribute('stroke','#1c4a30');
+    circle.setAttribute('stroke-width',2); svg.appendChild(circle);
+  }
+  const defs=document.createElementNS(svg.namespaceURI,'defs');
+  defs.innerHTML='<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2c6e49"/></marker>';
+  svg.appendChild(defs);
+  el.appendChild(svg);
+}
+function renderTree(){
+  const c=course.courses[budget]; const tree=document.getElementById('tree'); tree.innerHTML='';
+  const groups={'orientation':'1 · Orientation — what you are looking at, no moves',
+                'schema':'2 · Reusable schemas — what to understand',
+                'decision':'3 · Critical exact decisions — what to memorise'};
+  for (const kind of ['orientation','schema','decision']){
+    const items=c.items.filter(i=>i.kind===kind); if(!items.length) continue;
+    const g=document.createElement('div'); g.className='group';
+    g.innerHTML=`<div class="label">${groups[kind]}</div>`;
+    for (const item of items){
+      const div=document.createElement('div');
+      div.className='item'+(selected&&selected.item_id===item.item_id?' selected':'');
+      div.innerHTML=`<span class="kind">${item.kind}</span>${item.title}`;
+      div.onclick=()=>{ selected=item; ply=0; if(item.kind!=='orientation') line=[]; renderAll(); };
+      g.appendChild(div);
+    }
+    tree.appendChild(g);
+  }
+  const ex=c.exceptions||[];
+  if (ex.length){
+    const g=document.createElement('div'); g.className='group';
+    g.innerHTML=`<div class="label">Deviations (${ex.length}) — attached to the item they modify</div>`;
+    const shown=ex.slice(0,8);
+    for (const item of shown){
+      const div=document.createElement('div'); div.className='item';
+      div.innerHTML=`<span class="kind">deviation · modifies ${item.modifies.split(':')[0]}</span>${item.title}`;
+      div.onclick=()=>{ selected=item; renderAll(); };
+      g.appendChild(div);
+    }
+    if (ex.length>shown.length){
+      const more=document.createElement('div'); more.className='muted';
+      more.textContent=`…and ${ex.length-shown.length} more deviations in the generated file`;
+      g.appendChild(more);
+    }
+    document.getElementById('tree').appendChild(g);
+  }
+}
+function stateOf(event, board){
+  const turn = board.fen.split(' ')[1]==='w'?'w':'b';
+  const at=(s)=>board.pieces[s]||null;
+  if (event[0]==='piece_move'||event[0]==='pawn_move'){
+    const from = event[0]==='piece_move'? event[2] : event[1];
+    const piece = at(from);
+    if (!piece) return 'complete';
+    const colour = piece===piece.toUpperCase()?'w':'b';
+    if (colour!==turn) return 'unknown';
+    if (event[0]==='piece_move' && piece.toUpperCase()!==event[1]) return 'complete';
+    return 'actionable';
+  }
+  if (event[0]==='castle'){
+    const colour=event[1]; const home=colour==='w'?'e1':'e8';
+    const king=at(home);
+    if (!king || king.toLowerCase()!=='k') return 'complete';
+    return 'actionable';
+  }
+  return 'unknown';
+}
+function renderDetail(){
+  const d=document.getElementById('detail');
+  if(!selected){ d.innerHTML='<h2>Detail</h2><p class="muted">Select an item.</p>'; return; }
+  const item=selected; let html=`<h2>${item.kind}</h2><p><strong>${item.title}</strong></p>`;
+  if(item.kind==='orientation'){
+    html+=`<p class="recognition">Recognition only: this item names no move.</p>`;
+    const look=item.recognition.look_for||{};
+    html+=`<table><tr><th>piece</th><th>where it stands</th></tr>`;
+    for(const row of (look.recurring_occupancy||[]).slice(0,8)){
+      html+=`<tr><td>${row.piece}</td><td>${row.squares.map(s=>`${s.square} ${s.share.toFixed(2)}`).join(', ')}</td></tr>`;
+    }
+    html+=`</table>`;
+    if(item.destinations) html+=`<p class="muted">Arrows on the board are the recurring destinations from strong play.</p>`;
+  }
+  if(item.kind==='schema'){
+    html+=`<p class="prescription">This schema prescribes the moves that perform its transformations.</p>`;
+    html+=`<p class="muted">Applies to ${item.applicability.boards} boards, families ${item.applicability.families.map(f=>f.slice(0,8)).join(', ')}.</p>`;
+    for(const group of ['required','optional','residual']){
+      const rows=item.transformations[group]||[]; if(!rows.length) continue;
+      const label={required:'Required',optional:'Common but not required',residual:'Present in some covered plans only'}[group];
+      html+=`<p><span class="pill ${group}">${label}</span></p><ul>`;
+      for(const row of rows) html+=`<li>${row.text}</li>`;
+      html+=`</ul>`;
+    }
+    const o=item.ordering;
+    html+=`<p>Ordering: <strong>${o.constrained?'constrained':'largely free'}</strong> (flexibility ${o.flexibility==null?'n/a':o.flexibility.toFixed(2)})</p>`;
+    if(o.constraints && o.constraints.length) html+=`<ul>${o.constraints.map(c=>`<li>${c}</li>`).join('')}</ul>`;
+    const states=item.completion_state||{};
+    html+=`<p>Completion across its boards: `+Object.entries(states).map(([k,v])=>`<span class="pill ${k}">${k} ${v.share.toFixed(2)}</span>`).join('')+`</p>`;
+  }
+  if(item.kind==='decision'){
+    html+=`<p class="prescription">Remember this move here: <code>${item.prescribes.moves.join(' ')}</code></p>`;
+    const w=item.why_admitted;
+    html+=`<div class="why">Admitted because the selected schemas still left <strong>${w.residual_before.toFixed(5)}</strong> of value on this board, and this move removes <strong>${w.value_gained.toFixed(5)}</strong> (${(w.share_of_residual*100).toFixed(0)}% of the residual). Rule: ${w.rule}.</div>`;
+  }
+  if(item.kind==='exception'){
+    const w=item.why_selected;
+    html+=`<p class="prescription">What strong players do instead here: <code>${w.observed_move}</code></p>`;
+    html+=`<div class="why">${item.modifies.split(':')[0]} <code>${item.modifies}</code> covers only ${(w.schema_share_of_strong_play*100).toFixed(0)}% of what strong players played at this board, below the ${(w.threshold*100).toFixed(0)}% bar, so it is recorded as a deviation under it — not as a branch of its own.</div>`;
+  }
+  if(item.completion_state===undefined){}
+  const boardKey = item.board ? item.board.position_key : (selectedItemBoardKey());
+  if(boardKey){
+    html+=`<details><summary>Raw statistics (provenance)</summary><pre id="evidence" style="white-space:pre-wrap;font-size:11px">loading…</pre></details>`;
+    loadEvidence(boardKey);
+  }
+  html+=`<details><summary>Where this came from</summary><pre style="white-space:pre-wrap;font-size:11px">${JSON.stringify(item.provenance,null,1)}</pre></details>`;
+  d.innerHTML=html;
+}
+function selectedItemBoardKey(){
+  if(selected && selected.representative_board) return selected.representative_board.position_key;
+  if(selected && selected.boards_map) return Object.keys(selected.boards_map)[0];
+  return null;
+}
+async function loadEvidence(key){
+  try{
+    const r=await fetch('/evidence?position_key='+key); const data=await r.json();
+    const el=document.getElementById('evidence'); if(el) el.textContent=JSON.stringify(data,null,1).slice(0,4000);
+  }catch(e){ }
+}
+function renderAll(){
+  renderTree(); renderDetail();
+  const c=course.courses[budget], r=c.report;
+  document.getElementById('budget-summary').textContent =
+    `${r.items} items · ${r.burden} burden units · flow coverage ${r.flow_coverage.toFixed(3)} · strong-play explained ${r.behaviour_explained.toFixed(3)} · EV recovered ${r.recovery.toFixed(3)} · residual ${r.residual_value.toFixed(5)}`;
+  let fen=null, dest=null, highlight=null, caption='';
+  const family = selected && selected.provenance ? selected.provenance.family : null;
+  if(selected && selected.representative_board){
+    fen=selected.representative_board.fen;
+    dest=selected.destinations || familyDestinations[family];
+    caption=`Representative board of ${selected.title} (highest-reach position in the family).`;
+  } else if(line.length){
+    dest = family ? familyDestinations[family] : null;
+    fen=line[ply].fen; caption=`Representative move order, ply ${ply+1}: ${line[ply].uci} (played in ${line[ply].games} strong games).`;
+  } else if(selected && selected.board){
+    fen=selected.board.fen; caption='The board this item refers to.';
+  } else if(selected && selected.boards_map){
+    const key=Object.keys(selected.boards_map)[0]; caption='First board covered by this schema.';
+    fen=null; highlight=null;
+  }
+  if(fen){
+    let destinations=document.getElementById('show-dest').checked?dest:null;
+    let states=null;
+    if(document.getElementById('show-state').checked && selected && selected.kind==='schema'){
+      const pieces=fenSquares(fen);
+      const board={fen:fen,pieces:pieces};
+      highlight=[];
+      for(const row of selected.transformations.required){
+        const ev=row.component; const st=stateOf(ev,board);
+        const to = ev[0]==='castle' ? null : (ev[0]==='piece_move'? ev[3]: (ev[0]==='pawn_move'? ev[2]: null));
+        if(to && st==='actionable') highlight.push(to);
+      }
+      states=true;
+    }
+    drawBoard(fen,{destinations:destinations,highlight:highlight});
+  }
+  document.getElementById('board-caption').textContent=caption;
+  document.getElementById('ply').textContent=line.length?`${ply+1}/${line.length}`:'—';
+}
+async function boot(){
+  course=await (await fetch('/course.json')).json();
+  for(const b of course.budgets) for(const item of course.courses[String(b)].items)
+    if(item.kind==='orientation' && item.destinations && item.provenance.family)
+      familyDestinations[item.provenance.family]=item.destinations;
+  const bd=document.getElementById('budgets');
+  for(const b of course.budgets){
+    const btn=document.createElement('button'); btn.textContent=b+' units';
+    btn.className=String(b)===budget?'active':'';
+    btn.onclick=()=>{ budget=String(b); selected=null; line=[]; ply=0;
+      [...bd.children].forEach(c=>c.className=''); btn.className='active'; renderAll(); };
+    bd.appendChild(btn);
+  }
+  const c=course.courses[budget];
+  selected=c.items.find(i=>i.kind==='schema')||c.items[0];
+  line=(c.lines && c.lines[selected.provenance.family])||[];
+  document.getElementById('prev').onclick=()=>{ if(line.length){ ply=(ply-1+line.length)%line.length; renderAll(); } };
+  document.getElementById('next').onclick=()=>{ if(line.length){ ply=(ply+1)%line.length; renderAll(); } };
+  document.getElementById('show-dest').onchange=renderAll;
+  document.getElementById('show-state').onchange=renderAll;
+  renderAll();
+}
+boot();
+</script>
+</body>
+</html>
