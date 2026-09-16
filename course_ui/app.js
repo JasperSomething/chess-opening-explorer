@@ -109,21 +109,41 @@ function distance(a, b) {
   const dy = Math.abs(Number(a[1]) - Number(b[1]));
   return Math.max(dx, dy);
 }
+function ownerFor(sides, fen) {
+  /* A plan listed for one colour belongs to that colour, so its pieces are the ones to
+     read. A plan listed for both belongs to whoever is to move. Inferring this from the
+     side to move alone -- which is what this used to do -- draws a Black plan's arrows
+     from White's pieces whenever the shown position happens to have White to move. */
+  const list = sides || [];
+  if (list.length === 1 && list[0]) {
+    const first = list[0].charAt(0);
+    if (first === 'w' || first === 'b') return first;
+  }
+  return turnOf(fen);
+}
+function castleTarget(side, flank) {
+  /* component[2] is the flank ('k' or 'q'), never the colour */
+  const kingside = flank !== 'q';
+  if (side === 'w') return kingside ? 'g1' : 'c1';
+  return kingside ? 'g8' : 'c8';
+}
 /* the same state test the generator uses: has this transformation happened, is it
    still available, or can it not be read off a board at all */
-function transformationState(component, fen) {
-  const pieces = parseFen(fen); const turn = turnOf(fen);
+function transformationState(component, fen, side) {
+  const pieces = parseFen(fen); const turn = side || turnOf(fen);
   const kind = component[0];
   if (kind === 'goal') {
     const letter = component[1].toLowerCase(); const to = component[2];
     const own = turn === 'w' ? letter.toUpperCase() : letter;
     if (pieces[to] === own) return 'done';
     const from = squaresOf(pieces, own);
-    if (!from.length) return 'done';
+    /* the owning side having no such piece left means this cannot be read off the
+       board -- it is not the same thing as having completed the transformation */
+    if (!from.length) return 'unknown';
     return 'pending';
   }
   if (kind === 'castle') {
-    const colour = component[1]; const home = colour === 'w' ? 'e1' : 'e8';
+    const home = turn === 'w' ? 'e1' : 'e8';
     const king = pieces[home];
     if (!king || king.toLowerCase() !== 'k') return 'done';
     return 'pending';
@@ -131,8 +151,8 @@ function transformationState(component, fen) {
   if (kind === 'transform') return 'pending';
   return 'unknown';                                  // effects cannot be read off a board
 }
-function arrowFor(component, fen) {
-  const pieces = parseFen(fen); const turn = turnOf(fen);
+function arrowFor(component, fen, side) {
+  const pieces = parseFen(fen); const turn = side || turnOf(fen);
   const kind = component[0];
   if (kind === 'goal') {
     const letter = component[1].toLowerCase(); const to = component[2];
@@ -142,9 +162,10 @@ function arrowFor(component, fen) {
     return from ? {from, to, done:false} : null;
   }
   if (kind === 'castle') {
-    const colour = component[1]; const home = colour === 'w' ? 'e1' : 'e8';
-    if (pieces[home]) return {from: home, to: colour === 'w' ? 'g1' : 'g8', castle:true};
-    return {to: colour === 'w' ? 'g1' : 'g8', done:true};
+    const target = castleTarget(turn, component[2]);
+    const home = turn === 'w' ? 'e1' : 'e8';
+    if (pieces[home]) return {from: home, to: target, castle:true};
+    return {to: target, done:true};
   }
   return null;
 }
@@ -597,12 +618,15 @@ async function renderPlan(main, panel, itemId) {
     return {key, fen: data.position ? data.position.fen : null};
   }));
   const valid = fetched.filter(row => row.fen);
+  const sides = (item.applicability && item.applicability.sides) || [];
+  const ownerAt = f => ownerFor(sides, f);
   const scored = valid.map(row => ({...row,
-    pending: item.transformations.required.filter(t => transformationState(t.component, row.fen) === 'pending').length
-      + item.transformations.optional.filter(t => transformationState(t.component, row.fen) === 'pending').length}));
+    pending: item.transformations.required.filter(t => transformationState(t.component, row.fen, ownerAt(row.fen)) === 'pending').length
+      + item.transformations.optional.filter(t => transformationState(t.component, row.fen, ownerAt(row.fen)) === 'pending').length}));
   const chosen = (scored.sort((a,b)=>b.pending-a.pending)[0]) || valid[0] || candidates[0] && {key:candidates[0], fen:null};
   if (!chosen || !chosen.fen) { panel.innerHTML = '<p class="muted">Could not load a board for this plan.</p>'; return; }
   let fen = chosen.fen;
+  const planOwner = ownerAt(fen);
   let currentPositionKey = chosen.key;
   panel.innerHTML = '';
 
@@ -620,14 +644,14 @@ async function renderPlan(main, panel, itemId) {
   function arrowsFor(fenNow, highlightComponent) {
     const arrows = [];
     for (const t of required) {
-      const arrow = arrowFor(t.component, fenNow);
+      const arrow = arrowFor(t.component, fenNow, planOwner);
       if (arrow) arrows.push({...arrow,
-        done: transformationState(t.component, fenNow) === 'done',
+        done: transformationState(t.component, fenNow, planOwner) === 'done',
         emphasise: highlightComponent && sameComponent(t.component, highlightComponent)});
     }
     for (const t of optional) {
-      const arrow = arrowFor(t.component, fenNow);
-      if (arrow) arrows.push({...arrow, done: transformationState(t.component, fenNow) === 'done',
+      const arrow = arrowFor(t.component, fenNow, planOwner);
+      if (arrow) arrows.push({...arrow, done: transformationState(t.component, fenNow, planOwner) === 'done',
         style: 'optional'});
     }
     return arrows;
@@ -642,7 +666,7 @@ async function renderPlan(main, panel, itemId) {
     checklist.innerHTML = '';
     const rows = el('ul', 'rows');
     for (const t of required) {
-      const st = transformationState(t.component, fen);
+      const st = transformationState(t.component, fen, planOwner);
       const li = el('li', 'clickable',
         `<span class="tick ${st === 'done' ? 'done' : 'todo'}">${st === 'done' ? '✓' : '○'}</span>` +
         `<span>${translateTitle(t.text).replace(/ to /, ' to ')}</span>`);
@@ -651,7 +675,7 @@ async function renderPlan(main, panel, itemId) {
       rows.appendChild(li);
     }
     for (const t of optional) {
-      const st = transformationState(t.component, fen);
+      const st = transformationState(t.component, fen, planOwner);
       rows.appendChild(el('li', null,
         `<span class="tick ${st === 'done' ? 'done' : 'todo'}">${st === 'done' ? '✓' : '○'}</span>` +
         `<span class="muted">often: ${translateTitle(t.text)}</span>`));
@@ -754,7 +778,8 @@ function planEvidence(item, positionKey) {
       + `${item.coherence.conditional_branches} conditional branches.</p>`},
     {label: 'Transformation detail', kind: 'table', columns: ['transformation', 'class', 'state'],
       rows: (item.transformations.required || []).map(t => [translateTitle(t.text), 'required',
-        transformationState(t.component, state.board.fen || '')])
+        transformationState(t.component, state.board.fen || '',
+          ownerFor(item.applicability && item.applicability.sides, state.board.fen || ''))])
         .concat((item.transformations.optional || []).map(t => [translateTitle(t.text), 'common', '—']))
         .concat((item.transformations.expected_consequence || []).map(t => [t.text, 'effect', 'not testable']))},
     {label: 'Underlying boards', kind: 'json', data: Object.keys(item.boards_map || {})},
@@ -1002,7 +1027,8 @@ function renderReview(main, panel) {
       const fen = data.position.fen;
       holder.innerHTML = ''; holder.appendChild(drawBoard({fen}));
       const pending = answer.transformations.required
-        .filter(t => transformationState(t.component, fen) === 'pending')
+        .filter(t => transformationState(t.component, fen,
+          ownerFor(answer.applicability && answer.applicability.sides, fen)) === 'pending')
         .map(t => translateTitle(t.text));
       const correct = pending.length ? pending : answer.transformations.required.map(t => translateTitle(t.text));
       const distractors = shuffle(plans().filter(p => p !== answer)).slice(0, 3)
