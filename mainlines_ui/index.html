@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Opening Mainlines — 2200+</title>
+<link rel="stylesheet" href="/ui/styles.css">
+</head>
+<body>
+<div class="app">
+  <header class="brand">
+    <div class="mark"></div>
+    <div>
+      <h1>Opening Mainlines</h1>
+      <div class="sub" id="source-line">loading…</div>
+    </div>
+  </header>
+
+  <aside class="side">
+    <div class="filters">
+      <input id="search" type="search" placeholder="search opening, ECO code…" autocomplete="off">
+      <select id="eco">
+        <option value="">all volumes</option>
+      </select>
+      <div class="checks">
+        <label class="check"><input type="checkbox" id="mains-only"> family mainlines only</label>
+        <label class="check"><input type="checkbox" id="with-mirror"> has colour twin</label>
+      </div>
+    </div>
+    <div class="list" id="list"></div>
+  </aside>
+
+  <main class="main">
+    <div class="board-wrap">
+      <div class="board" id="board">
+        <div class="grid" id="grid"></div>
+        <svg class="overlay" id="overlay" viewBox="0 0 8 8" preserveAspectRatio="none"></svg>
+        <div class="badge" id="ply-badge"></div>
+      </div>
+      <div class="controls">
+        <button class="btn" id="first" title="start">⏮</button>
+        <button class="btn" id="prev" title="previous">◀</button>
+        <button class="btn" id="next" title="next">▶</button>
+        <button class="btn" id="last" title="end">⏭</button>
+        <span class="plynote" id="plynote"></span>
+      </div>
+    </div>
+  </main>
+
+  <aside class="panel">
+    <div class="heads">
+      <div class="kicker" id="p-eco">—</div>
+      <h2 id="p-name">Select an opening</h2>
+      <div class="sub" id="p-family"></div>
+      <div class="chips" id="eco-chips"></div>
+    </div>
+
+    <div class="stats" id="stats"></div>
+
+    <div id="mirror-block"></div>
+
+    <div class="moves-block">
+      <div class="label">mainline <span class="hint">click any move to jump</span></div>
+      <div class="moves" id="moves"></div>
+    </div>
+
+    <div class="line-block">
+      <div class="label">line <span class="hint">selectable</span></div>
+      <pre class="line" id="line"></pre>
+    </div>
+
+    <div class="alias-block" id="alias-block"></div>
+    <div class="notes" id="notes"></div>
+  </aside>
+</div>
+<script src="/ui/app.js"></script>
+</body>
+</html>

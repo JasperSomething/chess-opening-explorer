@@ -83,6 +83,53 @@ Resume uses the same PGN identity and settings; changed input requires a new gen
 
 Cached Lichess snapshots retain their original timestamps. For entirely fresh Lichess counts, start a fresh cache with the proof of concept instead of seeding it. Do not copy a live SQLite file directly; use its backup API or stop writers first.
 
+## Opening mainlines app
+
+`explorer.py` is the position browser. `study/mainlines_server.py` is a separate,
+read-only app that answers a different question: what is the mainline of every named
+opening, and where do positions reappear in the opposite colour complex?
+
+```sh
+# Build the dataset it serves (writes analysis/mainlines.json):
+python3 scripts/build_mainlines.py
+# Serve it:
+python3 study/mainlines_server.py --port 8790
+```
+
+Open http://127.0.0.1:8790/. It serves `mainlines_ui/` and `analysis/mainlines.json`
+and nothing else; it writes nothing.
+
+The dataset is derived from `data/lumbra-2200.sqlite` (both players >= 2200, frequent
+positions at the >=100 threshold) and the lichess-org/chess-openings taxonomy, which the
+builder downloads into `data/taxonomy/` on first run.
+
+Three things are worth knowing about how it is built.
+
+**One entry per position, not per name.** Every named line is extended by the most-played
+2200+ continuation (min 100 games per step, to ply 22) and the results are grouped by the
+final position, so move orders that transpose collapse into a single entry. That is why
+the King's Indian position carries 20 ECO codes and lists English, Zukertort, Modern and
+East Indian names as aliases. The representative name is chosen by an ordered preference
+list in `scripts/build_mainlines.py` — structure-defining names outrank move-order
+umbrellas — falling back to member count. Nothing is discarded: every ECO code and every
+alias stays on the entry, and aliases are searchable in the UI.
+
+**Colour-complex counterparts.** A position is mirrored (piece colours and ranks swapped,
+side to move and castling swapped, en-passant file mirrored) and looked up in the index,
+matching on board and castling. The side to move is deliberately ignored: swapping colours
+always flips it, so a twin can never sit at the same ply — the pair is one tempo apart,
+which is the "English is the Sicilian with colours reversed" relationship. Only mutual
+pairs are kept (A pairs with B only if B also mirrors back to A); without that test, a
+lone knight and pawn pairs unrelated openings.
+
+**Counts are position reach, not line reach.** Every number shown is the number of 2200+
+games reaching that position. Transpositions are pooled by construction, so a count can
+rise mid-line. There is no engine evaluation and no speed or rating stratification.
+
+`analysis/` is not tracked by git, so the dataset is not committed; the builder is, and
+regenerating it is one command. Run `python3 -m unittest tests.test_mainlines_app` to check
+the mirror transform and the dataset invariants.
+
 ## Inspect and test
 
 ```sh
