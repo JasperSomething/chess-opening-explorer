@@ -2,46 +2,113 @@
 
 ## Current state
 
-The full Lumbra OTB download and header inventory are complete: 10,355,488 records. The two-pass bulk importer is implemented and a full run has been launched, but **do not claim the local graph is complete until `state.phase` is `complete` and `state.sample` is false**. The UI exposes this distinction. Inspect the live database/log rather than relying on this document for process status.
+Every import is finished. Do not repeat the earlier claim that the pipeline is still
+running, and do not re-run a completed stage.
 
-User selections: use every game in the publisher’s OTB collection, and offer a comparison where both players have numeric ratings >=2200. No extra game-type or date filters. Local source is labelled Lumbra, not Lichess Masters. Original API database is preserved.
+| Database | State |
+|---|---|
+| `data/lumbra-2200-complete.sqlite` | complete. 10,355,488 scanned, 2,823,189 accepted, every 2200+ position, threshold 1 |
+| `data/lumbra-2200.sqlite` | complete. 2,823,189 accepted, frequent positions at threshold 100, 46,044 positions |
+| `data/lumbra.sqlite` | complete. All 10,355,488 games accepted, threshold 100 |
 
-## Implemented
+User selections stand: every game in the publisher's OTB collection, plus a comparison
+where both players have numeric ratings >= 2200. No game-type or date filter. Local source
+is labelled Lumbra, not Lichess Masters.
 
-- `lumbra.py`: python-chess visitor replays full mainlines; two 128 MiB saturating arrays find candidates without false negatives; exact second pass uses canonical FEN in SQLite. Repetitions count once per game/position with first outgoing continuation. No independent duplicate removal. Invalid games, unknown results and nonstandard starts are excluded and reported.
-- Candidate pass checkpoints every 20,000 games, exact pass every 1,000. Input offset and exact counts commit atomically. Candidate flush precedes checkpoint. Replaying a candidate batch only introduces extra candidates. Same settings/input resume; changed input requires new output.
-- Exact >=100 all-game edge closure is constructed after counting, with transpositions and incoming links. Both rating groups retain all continuations at retained positions.
-- `enrich_lumbra.py`: verified-cache seed via SQLite backup, Lichess-only missing-snapshot queue over the completed local retained graph, serial API rate handling inherited from the existing client. Separate cache avoids mixing this queue with the original Masters crawler.
-- UI: all-games and both-2200+ counts side by side; selector changes sorting; each group has its own percentage column. Cached Lichess statistics remain separate. Auto-refresh while importing or missing current Lichess data.
-- `explorer.py serve --local-db ...` supports alternate generations. Current local comparison server was launched on port 8766 with `data/lumbra-lichess.sqlite`.
+There are two apps and they answer different questions.
+
+## App 1: position browser (`explorer.py`, port 8766)
+
+All-games and both-2200+ counts side by side, each with its own percentage column;
+selector changes sorting and move ordering. Lichess statistics are separate and may
+remain pending without affecting local counts. Follow README for launch and resume.
+
+## App 2: opening mainlines (`study/mainlines_server.py`, port 8790)
+
+Read-only. Serves `mainlines_ui/` and `analysis/mainlines.json`, writes nothing.
+
+```sh
+python3 scripts/build_mainlines.py        # builds analysis/mainlines.json (~14 s)
+python3 study/mainlines_server.py --port 8790
+```
+
+The dataset joins the 2200+ frequent-position index with the lichess-org/chess-openings
+taxonomy, which the builder downloads into `data/taxonomy/` on first run:
+
+- each named line is extended by the most-played 2200+ continuation (min 100 games per
+  step, to ply 22)
+- results are grouped by FINAL POSITION, not by name, so move orders that transpose
+  collapse into one entry. This grouping is forced by the index, which keys on canonical
+  position identity and therefore pools transpositions by construction: move-order-only
+  distinctions cannot be recovered from it, no matter how the code is written
+- the representative name comes from an ordered preference list in the builder
+  (structure-defining names outrank move-order umbrellas), falling back to member count
+- each entry carries every ECO code and every alias name in its group; aliases are
+  searchable. Nothing is discarded by the condensation
+- each entry gets its colour-complex counterpart: the position mirrored (piece colours and
+  ranks swapped, side to move and castling swapped, en-passant file mirrored) and looked
+  up on board + castling. The side to move is ignored on purpose, because swapping colours
+  always flips it, so a twin is one tempo away and never sits at the same ply. Only mutual
+  pairs are kept (A pairs with B only if B mirrors back to A)
+
+Current output: 1,259 entries from 2,256 named lines, 93 families, 191 entries carrying
+more than one ECO code, 114 entries in mutual colour-twin pairs. The King's Indian
+position carries 20 codes (A04–A48, E60–E98) across 32 collapsed lines.
+
+Every number in the app is the count of 2200+ games reaching that position. There is no
+engine evaluation and no speed or rating stratification.
+
+### Two bugs this pipeline had, both silent
+
+Recorded because both were invisible from the outside and both are easy to reintroduce:
+
+1. The taxonomy line's endpoint was read AFTER the extension advanced the board, so the
+   "was this named line ever played at 2200+" test was really measuring the end of the
+   derived line. That excluded 1.a3 and roughly 790 other real named lines. The endpoint
+   must be captured before extending.
+2. Each entry's volume was the sum of its members' endpoint counts. Members share one
+   final position by construction, so this added up unrelated positions and reported
+   1,006,388 games for a position 2,858 games reach. It is now the position's own reach.
 
 ## Verification
 
-17 offline tests pass: legacy API graph tests plus local exact transpositions, Elo boundaries, repetitions, invalid records, canonical hashing, terminal totals, threshold closure, interruption/resume, missing-vs-zero overlay and Lichess-only cache reuse. A real 20,000-game sample completed both passes in ~69 seconds: 20,000 accepted, 1,578 both-2200+, 203 retained positions. This sample is ordered source data, not a representative random sample; do not infer global opening proportions or a precise runtime from it. Browser inspection verified comparison controls, progress and cached Lichess values. Sample databases are never substituted for the full reference.
+286 offline tests pass, 14 skipped. `tests/test_mainlines_app.py` is the app's own suite
+and asserts the invariants that matter: the mirror is an involution; it swaps colour, turn
+and castling and moves the en-passant file; replaying mirrored moves from the mirrored
+start lands on the mirrored endpoint; a twin never keeps the side to move; every stored
+line replays legally; every stored FEN is the position after its move, not before; no two
+entries share a position; twins are mutual and genuinely mirrored; families partition the
+entries.
 
-## Next checks
+The browser UI was checked by loading it, not by assuming: the board renders, the move
+list steps, filters and search work, and the twin jump navigates.
 
-1. Follow `data/lumbra-import.log`, and read `state` from `data/lumbra.sqlite`. Check free disk and report exclusions. A full run can take many hours; the entire generation has not yet been verified.
-2. Once complete, verify root accepted totals, strong subset totals, graph closure, stored move legality and transposed statistics against the source. Confirm no incomplete generation is called complete.
-3. The current background pipeline chains import success to Lichess enrichment. Confirm it is still running; after an interruption repeat the commands in README. Lichess coverage will take longer than local reference import.
-4. Long-term improvement: profile the exact aggregation and add richer progress/ETA reporting if useful. The disk guard stops below 3 GiB free. No full-corpus disk-size estimate has been proven yet.
+## Open work
+
+1. **The user's own definition of "mainline" is not yet written down.** The app is a first
+   attempt built to be corrected: frequency mainlines, not theoretical ones. The user said
+   they know what they consider mainline and would write guidelines. Expect the variant
+   list and the choice of definition to change. The representative-name preference list is
+   one edit in the builder.
+2. **Variant granularity is unresolved.** Three defensible options: the 3,815 taxonomy
+   names, the 1,259 condensed positions, or an explicit user-authored list.
+3. **Dead code.** The Scandinavian study library (39 modules besides `__init__.py` and the
+   new `mainlines_server.py`: `curriculum_build/audit/compare`, `course_report`,
+   `course_walkthrough`, `plans`, `family`, and the rest) is still present. The course app
+   it fed has been removed, and four of those modules read `analysis/course.json`, which no
+   longer exists. Removing them is pending a decision.
+4. **Counterpart coverage is bounded** by the taxonomy: a genuine left-handed line nobody
+   has named will not be found.
+5. The Lichess enrichment queue over the all-games retained graph has not been confirmed
+   complete. Check `data/lumbra-enrichment.log` and the cache rather than assuming.
 
 ## Paths and commands
 
-Source PGN: `data/LumbrasGigaBase_OTB_Complete.pgn`. Local graph: `data/lumbra.sqlite`; preserve its `.candidates` file until complete. API cache: `data/lumbra-lichess.sqlite`. Original `openings.sqlite` stays unchanged by the new pipeline. Some early candidate/sample databases may remain locally for inspection and are ignored by Git.
+Source PGN: `data/LumbrasGigaBase_OTB_Complete.pgn`. Databases and `analysis/` are both
+ignored by Git: a clone has the code and the builders, not the data. The mainlines dataset
+regenerates in about 14 seconds from the 2200+ index.
 
-Follow README for launch, resume, enrichment and rebuild commands. Data, candidate arrays, tokens and logs must stay out of Git. Public source metadata attributes Lumbra’s CC BY-NC-SA 4.0 database. The separate local HERMES-HANDOFF.md includes machine-specific context and must not be published automatically.
-
-## Latest priority change
-
-User requested 2200+ first. The all-games importer is paused at its checkpoint. A chained pipeline now builds `data/lumbra-2200.sqlite` using `--minimum-rating 2200`, then resumes `lumbra.py`, then runs enrichment. UI reads the independent strong-player graph until the all-games graph is complete. Headers below 2200 or missing ratings skip move replay. There are now 18 passing offline tests. Inspect logs and state for current process progress.
-
-## Latest change: every 2200+ position
-
-User explicitly approved removing the 2200+ frequency cutoff. `complete_2200.py` builds `data/lumbra-2200-complete.sqlite` in one pass with a lossless 34-byte board-position encoding and W/D/L per outgoing move; no approximate filter and no frequency/depth cutoff. Standard-start/result/rating validation and first-continuation-per-game semantics remain unchanged. The all-games generation still has threshold 100.
-
-The active pipeline was replaced: complete-position 2200+ build first, then resume `lumbra.py`, then existing Lichess enrichment. Original 2200+ graph remains available while rebuilding. HTTP overlay preserves its exact frequent-position counts and exposes partial new counts only for previously unknown positions. On completion the new database always supplies 2200+ counts, even after the all-games generation completes.
-
-23 tests pass, including compact-key identity, rare continuations, transpositions, terminal positions, repetition semantics, atomic resumption and protection of existing finished counts. A 20,000-record benchmark accepted 1,578 games and used 3.5 MB; it is not representative of the whole corpus. Full disk footprint/runtime remain unverified. New importer stops below 5 GiB free. No candidate file is required for this importer. Full build was started; verify its state/log before claiming completion.
-
-The originally reported missing line was 1.e4 c5 2.Nc3 g6 3.Bc4. That move had 24 games in the old parent position and its child was omitted by threshold 100. The UI now distinguishes absent indexing from zero games and permits legal navigation without either source cached.
+Follow README for launch, resume, enrichment and rebuild commands. Data, candidate arrays,
+tokens and logs must stay out of Git. Public source metadata attributes Lumbra's
+CC BY-NC-SA 4.0 database. The machine-specific `HERMES-HANDOFF.md` under `outputs/` holds
+local process state, paths and credentials and must not be published.
